@@ -1,0 +1,18 @@
+{
+  "id": "WH-EV-1001-CREATED",
+  "event_version": "1.0",
+  "create_time": "2026-10-25T14:30:05.000Z",
+  "resource_type": "dispute",
+  "event_type": "CUSTOMER.DISPUTE.CREATED",
+  "summary": "Dispute created for transaction",
+  "resource": {
+    "dispute_id": "PP-D-1001",
+    "dispute_amount": {
+      "currency_code": "USD",
+      "value": "48.00"
+    },
+    "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+    "status": "WAITING_FOR_SELLER_RESPONSE",
+    "seller_response_due_date": "2026-10-27T14:30:00.000Z"
+  }
+}

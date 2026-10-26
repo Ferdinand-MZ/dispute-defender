@@ -1,0 +1,35 @@
+{
+  "dispute_id": "PP-D-1001",
+  "create_time": "2026-10-25T14:30:00.000Z",
+  "update_time": "2026-10-25T14:30:00.000Z",
+  "status": "WAITING_FOR_SELLER_RESPONSE",
+  "dispute_state": "REQUIRED_ACTION",
+  "dispute_amount": {
+    "currency_code": "USD",
+    "value": "48.00"
+  },
+  "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+  "dispute_life_cycle_stage": "CHARGEBACK",
+  "dispute_channel": "INTERNAL",
+  "seller_response_due_date": "2026-10-27T14:30:00.000Z",
+  "disputed_transactions": [
+    {
+      "buyer_transaction_id": "8AB1234567890123A",
+      "seller_transaction_id": "5EA1234567890123A",
+      "gross_amount": {
+        "currency_code": "USD",
+        "value": "48.00"
+      },
+      "invoice_number": "INV-1001",
+      "custom": "O-1001"
+    }
+  ],
+  "messages": [
+    {
+      "posted_by": "BUYER",
+      "time_posted": "2026-10-25T14:30:00.000Z",
+      "content": "I ordered earbuds last week but have not received the package yet."
+    }
+  ],
+  "evidences": []
+}
