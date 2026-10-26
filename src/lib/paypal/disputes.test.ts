@@ -1,0 +1,108 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  listSandboxDisputes,
+  getSandboxDispute,
+  provideDisputeEvidence,
+} from "./disputes";
+
+describe("PayPal Customer Disputes v1 API Integration", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("lists disputes and parses items correctly", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/oauth2/token")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({ access_token: "mock_token", expires_in: 3600 }),
+        };
+      }
+
+      if (url.includes("/v1/customer/disputes")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({
+            items: [
+              {
+                dispute_id: "PP-D-1001",
+                reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+                status: "WAITING_FOR_SELLER_RESPONSE",
+                dispute_amount: { currency_code: "USD", value: "48.00" },
+              },
+            ],
+            links: [],
+          }),
+        };
+      }
+
+      throw new Error(`Unhandled mock endpoint: ${url}`);
+    });
+
+    const result = await listSandboxDisputes({ pageSize: 5 });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].dispute_id).toBe("PP-D-1001");
+    expect(result.items[0].status).toBe("WAITING_FOR_SELLER_RESPONSE");
+  });
+
+  it("throws error if provideDisputeEvidence is called without approvedBy (human approval gatekeeper)", async () => {
+    await expect(
+      provideDisputeEvidence({
+        disputeId: "PP-D-1001",
+        evidencePayload: {
+          evidences: [{ evidence_type: "PROOF_OF_FULFILLMENT" }],
+        },
+        approvedBy: "", // Missing approval
+      })
+    ).rejects.toThrow("SECURITY_VIOLATION");
+  });
+
+  it("blocks evidence submission if dispute is not in WAITING_FOR_SELLER_RESPONSE status", async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("/oauth2/token")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({ access_token: "mock_token", expires_in: 3600 }),
+        };
+      }
+
+      if (url.includes("/v1/customer/disputes/PP-D-RESOLVED")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({
+            dispute_id: "PP-D-RESOLVED",
+            reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+            status: "RESOLVED", // Already resolved!
+            dispute_amount: { currency_code: "USD", value: "48.00" },
+          }),
+        };
+      }
+
+      throw new Error(`Unhandled endpoint: ${url}`);
+    });
+
+    await expect(
+      provideDisputeEvidence({
+        disputeId: "PP-D-RESOLVED",
+        evidencePayload: {
+          evidences: [{ evidence_type: "PROOF_OF_FULFILLMENT" }],
+        },
+        approvedBy: "Merchant Admin",
+      })
+    ).rejects.toThrow("Cannot provide evidence");
+  });
+});

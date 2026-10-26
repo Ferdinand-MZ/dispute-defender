@@ -10,6 +10,10 @@ interface TokenCache {
 
 let cachedToken: TokenCache | null = null;
 
+export function clearPayPalTokenCache(): void {
+  cachedToken = null;
+}
+
 export class PayPalApiError extends Error {
   public status: number;
   public debugId?: string;
@@ -57,9 +61,13 @@ export async function getPayPalAccessToken(): Promise<string> {
 
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => ({}))) as PayPalErrorResponse;
+    const errorMsg = errorBody.name && errorBody.message
+      ? `${errorBody.name}: ${errorBody.message}`
+      : (errorBody.message || errorBody.name || "Failed to obtain PayPal OAuth token");
+
     throw new PayPalApiError(
       response.status,
-      errorBody.message || "Failed to obtain PayPal OAuth token",
+      errorMsg,
       debugId,
       errorBody
     );
@@ -126,9 +134,13 @@ export async function payPalRequest<T>(
         }
 
         const errorBody = (await res.json().catch(() => ({}))) as PayPalErrorResponse;
+        const errorMsg = errorBody.name && errorBody.message
+          ? `${errorBody.name}: ${errorBody.message}`
+          : (errorBody.message || errorBody.name || `Request to ${endpoint} failed with HTTP ${res.status}`);
+
         throw new PayPalApiError(
           res.status,
-          errorBody.message || `Request to ${endpoint} failed with HTTP ${res.status}`,
+          errorMsg,
           debugId,
           errorBody
         );
