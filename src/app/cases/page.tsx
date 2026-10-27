@@ -1,30 +1,11 @@
-import { db } from "@/lib/db";
-import { disputes, analyses } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { listCaseRows } from "@/lib/db/queries";
 import { CasesGrid, CaseRow } from "@/components/cases-grid";
 import { Inbox } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function CasesPage() {
-  const casesData = await db
-    .select({
-      paypalDisputeId: disputes.paypalDisputeId,
-      orderId: disputes.orderId,
-      reason: disputes.reason,
-      amountMinor: disputes.amountMinor,
-      currency: disputes.currency,
-      paypalStatus: disputes.paypalStatus,
-      caseState: disputes.caseState,
-      sellerResponseDueAt: disputes.sellerResponseDueAt,
-      createdAt: disputes.createdAt,
-      recommendation: analyses.recommendation,
-      strengthScore: analyses.strengthScore,
-      pWinBand: analyses.pWinBand,
-    })
-    .from(disputes)
-    .leftJoin(analyses, eq(disputes.paypalDisputeId, analyses.disputeId))
-    .orderBy(desc(disputes.createdAt));
+  const casesData = await listCaseRows();
 
   return (
     <div className="space-y-6">
