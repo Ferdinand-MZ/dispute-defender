@@ -8,7 +8,7 @@ const envSchema = z.object({
   PAYPAL_WEBHOOK_ID: z.string().optional().default(""),
   PAYPAL_BUYER_PAYER_ID: z.string().optional().default(""),
   AI_PROVIDER: z.enum(["google", "anthropic", "openai"]).default("google"),
-  AI_MODEL: z.string().default("gemini-1.5-flash"),
+  AI_MODEL: z.string().min(1).default("gemini-3.8-flash"),
   AI_API_KEY: z.string().optional().default(""),
   DATABASE_URL: z.string().default("file:./data/app.db"),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
