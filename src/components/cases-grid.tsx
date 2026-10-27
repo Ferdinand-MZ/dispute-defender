@@ -4,7 +4,9 @@ import { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { AgGridProvider, AgGridReact } from "ag-grid-react";
 import {
   AllCommunityModule,
+  CellKeyDownEvent,
   ColDef,
+  FullWidthCellKeyDownEvent,
   ICellRendererParams,
   GridApi,
   GridReadyEvent,
@@ -12,9 +14,12 @@ import {
   RowClickedEvent,
   themeQuartz,
 } from "ag-grid-community";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Download, Inbox, Search } from "lucide-react";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { getDeadlineStatus, Urgency } from "@/lib/deadline";
 import { cn } from "@/lib/utils";
 
@@ -110,14 +115,36 @@ export function CasesGrid({ rowData }: CasesGridProps) {
     return () => clearInterval(id);
   }, []);
 
-  const onRowClicked = useCallback(
-    (event: RowClickedEvent<CaseRow>) => {
-      if (event.data?.paypalDisputeId) {
-        router.push(`/cases/${event.data.paypalDisputeId}`);
-      }
+  const [quickFilter, setQuickFilter] = useState("");
+
+  const openCase = useCallback(
+    (disputeId: string | undefined) => {
+      if (disputeId) router.push(`/cases/${disputeId}`);
     },
     [router]
   );
+
+  const onRowClicked = useCallback(
+    (event: RowClickedEvent<CaseRow>) => {
+      // The ID cell is a real link; let it handle its own click (incl. middle-click / new tab).
+      if ((event.event?.target as HTMLElement | null)?.closest("a")) return;
+      openCase(event.data?.paypalDisputeId);
+    },
+    [openCase]
+  );
+
+  const onCellKeyDown = useCallback(
+    (event: CellKeyDownEvent<CaseRow> | FullWidthCellKeyDownEvent<CaseRow>) => {
+      if ((event.event as KeyboardEvent | null)?.key === "Enter") {
+        openCase(event.data?.paypalDisputeId);
+      }
+    },
+    [openCase]
+  );
+
+  const exportCsv = useCallback(() => {
+    gridApiRef.current?.exportDataAsCsv({ fileName: "dispute-queue.csv" });
+  }, []);
 
   const columnDefs = useMemo<ColDef<CaseRow>[]>(() => {
     return [
@@ -127,11 +154,16 @@ export function CasesGrid({ rowData }: CasesGridProps) {
         filter: "agTextColumnFilter",
         sortable: true,
         width: 170,
+        pinned: "left",
         cellRenderer: (params: ICellRendererParams<CaseRow>) => {
           return (
-            <span className="font-mono text-primary font-medium cursor-pointer hover:underline">
+            <Link
+              href={`/cases/${params.value}`}
+              className="font-mono text-primary font-medium hover:underline"
+              tabIndex={-1}
+            >
               {params.value}
-            </span>
+            </Link>
           );
         },
       },
@@ -242,8 +274,41 @@ export function CasesGrid({ rowData }: CasesGridProps) {
     };
   }, []);
 
+  if (rowData.length === 0) {
+    return (
+      <div className="flex h-[320px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-card text-center">
+        <Inbox className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+        <p className="font-medium text-foreground">No disputes yet</p>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          New PayPal disputes appear here when the dispute webhook arrives. In the sandbox, open a dispute from
+          the buyer account to see one.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <AgGridProvider modules={gridModules}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <label className="relative w-full max-w-xs">
+          <span className="sr-only">Search cases</span>
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <input
+            type="search"
+            value={quickFilter}
+            onChange={(e) => setQuickFilter(e.target.value)}
+            placeholder="Search ID, reason, state…"
+            className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={exportCsv}>
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          Export CSV
+        </Button>
+      </div>
       <div className="w-full h-[520px]">
         <AgGridReact<CaseRow>
           theme={gridTheme}
@@ -252,8 +317,10 @@ export function CasesGrid({ rowData }: CasesGridProps) {
           defaultColDef={defaultColDef}
           animateRows={true}
           rowClassRules={rowClassRules}
+          quickFilterText={quickFilter}
           onGridReady={onGridReady}
           onRowClicked={onRowClicked}
+          onCellKeyDown={onCellKeyDown}
         />
       </div>
     </AgGridProvider>

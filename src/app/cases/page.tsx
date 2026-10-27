@@ -2,8 +2,7 @@ import { db } from "@/lib/db";
 import { disputes, analyses } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { CasesGrid, CaseRow } from "@/components/cases-grid";
-import { Inbox, Filter, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Inbox } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -37,18 +36,8 @@ export default async function CasesPage() {
             Merchant Dispute Queue
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            AG Grid case queue. Click any dispute row to inspect ground truth, recommendations, and evidence draft.
+            Most urgent deadlines first. Open a case to review its facts, recommendation, and evidence draft.
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-            <Filter className="h-3.5 w-3.5" />
-            Filter Cases
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-            <RefreshCw className="h-3.5 w-3.5" />
-            Poll PayPal API
-          </Button>
         </div>
       </div>
 
