@@ -98,27 +98,20 @@ export async function provideDisputeEvidence({
 
   const endpoint = `/v1/customer/disputes/${encodeURIComponent(disputeId)}/provide-evidence`;
 
-  if (evidenceFile) {
-    // Multipart form submission
-    const formData = new FormData();
-    formData.append("input", JSON.stringify(evidencePayload));
+  // The API accepts multipart/form-data only: evidence JSON in the `input` part, optional file in `evidence-file`.
+  const formData = new FormData();
+  formData.append("input", new Blob([JSON.stringify(evidencePayload)], { type: "application/json" }));
 
+  if (evidenceFile) {
     const blob = new Blob([new Uint8Array(evidenceFile.buffer)], { type: evidenceFile.mimeType });
     formData.append("evidence-file", blob, evidenceFile.filename);
-
-    await payPalRequest<void>(endpoint, {
-      method: "POST",
-      requestId: requestId || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      body: formData,
-    });
-  } else {
-    // JSON submission
-    await payPalRequest<void>(endpoint, {
-      method: "POST",
-      requestId: requestId || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      body: JSON.stringify(evidencePayload),
-    });
   }
+
+  await payPalRequest<void>(endpoint, {
+    method: "POST",
+    requestId: requestId || `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    body: formData,
+  });
 }
 
 export type AdjudicationOutcome = "BUYER_FAVOR" | "SELLER_FAVOR";
