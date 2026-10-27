@@ -228,7 +228,7 @@ Render cron job calls `POST /api/cron/deadlines` every 15 minutes: recompute urg
 
 ## 10. Deployment (Render)
 
-- Web service: build `npm ci && npm run build`, start `npm run start`, health check `/api/health`.
+- Web service: build `pnpm install --frozen-lockfile && pnpm run build`, start `pnpm run start`, health check `/api/health`.
 - Register the webhook in the PayPal developer dashboard pointing to `https://<service>.onrender.com/api/webhooks/paypal` with the three dispute events. Save its ID as `PAYPAL_WEBHOOK_ID`.
 - Cron job: HTTP call with `x-cron-secret`.
 - Free instances sleep. Ping the app before recording and before judging periods. Document this in the README and offer local run instructions as the primary path.

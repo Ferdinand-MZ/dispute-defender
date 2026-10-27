@@ -12,7 +12,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:push": "mkdir -p data && drizzle-kit push",
+    "db:push": "drizzle-kit push",
     "db:seed": "tsx src/lib/db/seed.ts",
     "demo:reset": "tsx scripts/demo-reset.ts"
   },

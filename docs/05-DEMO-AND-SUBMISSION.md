@@ -17,7 +17,7 @@ Centang semuanya sebelum submit. Baca juga halaman **Rules** resmi, karena saya 
 - [ ] Status Devpost: **Submitted**, bukan draft
 - [ ] Anggota tim ditambahkan, pilihan kategori hadiah dan sponsor diisi
 
-## 2. Data seed demo (`npm run demo:reset`)
+## 2. Data seed demo (`pnpm run demo:reset`)
 
 Semua mata uang USD. Nomor resi sengaja palsu. Alamat dan nama fiktif.
 
@@ -93,7 +93,7 @@ More dispute reasons, shipment carrier integrations for automatic delivery proof
 
 1. Satu kalimat apa ini, plus tangkapan layar utama.
 2. Demo: tautan hosted, kredensial demo (jika ada), catatan "instance bisa tertidur, tunggu sekitar satu menit".
-3. Menjalankan lokal (di bawah 10 menit): prasyarat, `.env` dari `.env.example`, `npm ci`, `npm run db:push`, `npm run demo:reset`, `npm run dev`, cara membuat akun dan app sandbox PayPal, cara mendaftarkan webhook (atau memakai polling cron).
+3. Menjalankan lokal (di bawah 10 menit): prasyarat, `.env` dari `.env.example`, `pnpm install`, `pnpm run db:push`, `pnpm run demo:reset`, `pnpm run dev`, cara membuat akun dan app sandbox PayPal, cara mendaftarkan webhook (atau memakai polling cron).
 4. Cara mencoba skenario S1 sampai S4 langkah demi langkah.
 5. Arsitektur singkat (diagram dari dokumen 02).
 6. Alat AI dan cara dipakai.
