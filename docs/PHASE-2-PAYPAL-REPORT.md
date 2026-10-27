@@ -29,8 +29,8 @@ Phase 2 establishes the end-to-end PayPal Sandbox integration foundation for **D
 | **Orders** | `POST /v2/checkout/orders/{id}/capture` | [`src/lib/paypal/orders.ts`](../src/lib/paypal/orders.ts) | Captures funds for buyer-approved sandbox order with `PayPal-Request-Id`. |
 | **Disputes** | `GET /v1/customer/disputes` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | Queries dispute list with filters (`dispute_state`, `page_size`, `update_time_*`). |
 | **Disputes** | `GET /v1/customer/disputes/{id}` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | Retrieves full dispute details (transactions, messages, evidence requirements). Validated via `PayPalDisputeSchema`. |
-| **Disputes** | `POST /v1/customer/disputes/{id}/provide-evidence` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | **Human-gated.** Submits evidence JSON or multipart documents. Pre-flight check ensures status is `WAITING_FOR_SELLER_RESPONSE`. |
-| **Disputes** | `POST /v1/customer/disputes/{id}/adjudicate` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | **Sandbox only simulation helper.** Settles dispute in merchant or buyer favor (`REVERT_PAYMENT`) to close the lifecycle. |
+| **Disputes** | `POST /v1/customer/disputes/{id}/provide-evidence` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | **Human-gated.** Submits evidence as `multipart/form-data` (JSON `input` part, optional `evidence-file`). Pre-flight check ensures status is `WAITING_FOR_SELLER_RESPONSE`. |
+| **Disputes** | `POST /v1/customer/disputes/{id}/adjudicate` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | **Sandbox only simulation helper.** Settles an `UNDER_REVIEW` dispute with `adjudication_outcome` `SELLER_FAVOR` or `BUYER_FAVOR` to close the lifecycle. |
 | **Disputes** | `POST /v1/customer/disputes/{id}/accept-claim` | [`src/lib/paypal/disputes.ts`](../src/lib/paypal/disputes.ts) | **Human-gated.** Merchant accepts buyer claim in accordance with store policy. |
 | **Webhooks** | `POST /v1/notifications/verify-webhook-signature` | [`src/lib/paypal/webhook.ts`](../src/lib/paypal/webhook.ts) | Validates incoming webhook signature headers before processing. |
 
@@ -55,23 +55,25 @@ Implemented in [`src/lib/paypal/sync.ts`](../src/lib/paypal/sync.ts):
 
 Five focused CLI spike scripts were built in `scripts/`:
 
+`tsx` does not load `.env` on its own, so each command passes `--env-file=.env`.
+
 ```bash
 # 1. Verify Sandbox OAuth2 Authentication
-pnpm tsx scripts/spike-auth.ts
+pnpm tsx --env-file=.env scripts/spike-auth.ts
 
 # 2. Create & Capture Sandbox Checkout Orders
-pnpm tsx scripts/spike-orders.ts
-pnpm tsx scripts/spike-orders.ts --capture=<PAYPAL_ORDER_ID>
+pnpm tsx --env-file=.env scripts/spike-orders.ts
+pnpm tsx --env-file=.env scripts/spike-orders.ts --capture=<PAYPAL_ORDER_ID>
 
 # 3. List Customer Disputes
-pnpm tsx scripts/spike-list-disputes.ts
-pnpm tsx scripts/spike-list-disputes.ts --sync
+pnpm tsx --env-file=.env scripts/spike-list-disputes.ts
+pnpm tsx --env-file=.env scripts/spike-list-disputes.ts --sync
 
 # 4. Fetch Full Dispute Details
-pnpm tsx scripts/spike-dispute-details.ts <PAYPAL_DISPUTE_ID>
+pnpm tsx --env-file=.env scripts/spike-dispute-details.ts <PAYPAL_DISPUTE_ID>
 
 # 5. Submit Evidence (Strictly Human-Gated)
-pnpm tsx scripts/spike-provide-evidence.ts <PAYPAL_DISPUTE_ID> --approve="Your Name"
+pnpm tsx --env-file=.env scripts/spike-provide-evidence.ts <PAYPAL_DISPUTE_ID> --approve="Your Name"
 ```
 
 ### Safety Features of Spike Scripts
@@ -135,8 +137,8 @@ $ pnpm run build
 - **Dispute Creation API Limitation:** As documented in Phase 0, programmatic dispute creation (`POST /v1/customer/disputes`) requires a `PayPal-Auth-Assertion` header. If a developer sandbox app lacks assertion scopes, developers can use the documented manual procedure:
   1. Open [https://www.sandbox.paypal.com](https://www.sandbox.paypal.com) and log in with your sandbox buyer account.
   2. Navigate to **Resolution Center** -> **Report a Problem**.
-  3. Select the test transaction created via `pnpm tsx scripts/spike-orders.ts` and open a dispute for "Item Not Received".
-  4. Run `pnpm tsx scripts/spike-list-disputes.ts --sync` to ingest the new dispute into DisputeDefender.
+  3. Select the test transaction created via `pnpm tsx --env-file=.env scripts/spike-orders.ts` and open a dispute for "Item Not Received".
+  4. Run `pnpm tsx --env-file=.env scripts/spike-list-disputes.ts --sync` to ingest the new dispute into DisputeDefender.
 
 ---
 

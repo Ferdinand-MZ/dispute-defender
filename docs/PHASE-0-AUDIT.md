@@ -84,7 +84,7 @@ Financial and state transitions carry severe risk if left unchecked. The archite
 - **Webhook Verification:** `POST /v1/notifications/verify-webhook-signature` returns `{ "verification_status": "SUCCESS" | "FAILURE" }`.
 - **Capture Refund:** `POST /v2/payments/captures/{capture_id}/refund` requires `PayPal-Request-Id` for idempotency.
 - **Sandbox Simulation:**
-  - `POST /v1/customer/disputes/{id}/adjudicate` accepts `{ "adjudication_type": "REVERT_PAYMENT" }` to settle in merchant or buyer favor.
+  - `POST /v1/customer/disputes/{id}/adjudicate` accepts `{ "adjudication_outcome": "SELLER_FAVOR" | "BUYER_FAVOR" }` for a dispute in `UNDER_REVIEW` (per the official schema).
   - Error simulation via standard negative testing IDs (e.g. `/v1/customer/disputes/ERRDIS015` returning 403 Forbidden).
 
 ### Documented Assumptions Requiring Live Sandbox Spike (Task T04)
