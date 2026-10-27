@@ -32,6 +32,23 @@ import {
   XCircle,
 } from "lucide-react";
 import type { Dispute, Order, Fact, Analysis, Draft, Action, AuditLogEntry } from "@/lib/db/schema";
+import type { GroundingError } from "@/lib/agent/grounding";
+
+// Fixed locale and UTC so server and browser render identical text (no hydration mismatch).
+const dateTimeFormat = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+function formatUtc(iso: string): string {
+  return `${dateTimeFormat.format(new Date(iso))} UTC`;
+}
+
+const recommendationVariant: Record<string, "success" | "warning" | "destructive"> = {
+  FIGHT: "success",
+  REFUND: "warning",
+  ACCEPT: "destructive",
+};
 
 interface CaseDetailViewProps {
   dispute: Dispute;
@@ -54,8 +71,6 @@ export function CaseDetailView({
 }: CaseDetailViewProps) {
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
 
   // Parse draft body JSON if present
   let parsedDraftBody: {
@@ -84,15 +99,28 @@ export function CaseDetailView({
     }
   }
 
-  const handleApproveAndSubmit = async () => {
-    setIsSubmitting(true);
-    // Simulate approval and submission in foundation phase
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setSubmitSuccess(true);
-      setShowApprovalModal(false);
-    }, 1200);
+  const showFact = (factId: string) => {
+    setSelectedFactId(factId);
+    document.getElementById(`fact-${factId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
+
+  let groundingErrors: GroundingError[] = [];
+  if (draft?.groundingErrorsJson) {
+    try {
+      groundingErrors = JSON.parse(draft.groundingErrorsJson);
+    } catch {
+      groundingErrors = [];
+    }
+  }
+
+  const groundingPassed = draft?.groundingStatus === "pass" || draft?.groundingStatus === "edited_pass";
+  const citedFactIds = Array.from(
+    new Set(
+      parsedDraftBody?.sections?.flatMap((section) => section.paragraphs.flatMap((p) => p.claimRefs)) ?? []
+    )
+  );
+  const paragraphCount =
+    parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
 
   return (
     <div className="space-y-6">
@@ -120,36 +148,30 @@ export function CaseDetailView({
             }
             className="font-mono text-xs uppercase"
           >
-            {submitSuccess ? "SUBMITTED" : dispute.caseState}
+            {dispute.caseState}
           </Badge>
         </div>
 
         <div className="flex items-center gap-2">
-          {draft && draft.groundingStatus === "pass" && (
+          {draft && groundingPassed && (
             <Badge variant="success" className="gap-1 text-xs">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Grounding Passed (100% cited)
+              Grounding passed · {paragraphCount} paragraphs, {citedFactIds.length} facts cited
             </Badge>
           )}
           {draft && draft.groundingStatus === "fail" && (
             <Badge variant="destructive" className="gap-1 text-xs">
               <ShieldAlert className="h-3.5 w-3.5" />
-              Grounding Failed
+              Grounding failed · {groundingErrors.length} {groundingErrors.length === 1 ? "issue" : "issues"}
+            </Badge>
+          )}
+          {!draft && (
+            <Badge variant="outline" className="text-xs">
+              No draft yet
             </Badge>
           )}
         </div>
       </div>
-
-      {submitSuccess && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 text-sm flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
-            <span>
-              <strong>Evidence Packet Submitted Successfully (Simulation).</strong> Recorded in actions and audit log. Case updated to <code>SUBMITTED</code>.
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* 3-Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -180,9 +202,7 @@ export function CaseDetailView({
                 <span className="text-muted-foreground">Response Deadline:</span>
                 <p className="font-medium text-foreground flex items-center gap-1 mt-0.5">
                   <Clock className="h-3.5 w-3.5 text-amber-600" />
-                  {dispute.sellerResponseDueAt
-                    ? new Date(dispute.sellerResponseDueAt).toLocaleString()
-                    : "No deadline specified"}
+                  {dispute.sellerResponseDueAt ? formatUtc(dispute.sellerResponseDueAt) : "No deadline specified"}
                 </p>
               </div>
             </CardContent>
@@ -244,7 +264,7 @@ export function CaseDetailView({
                     <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-primary" />
                     <p className="font-semibold text-foreground">{log.action}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      Actor: <span className="font-mono text-primary">{log.actor}</span> • {new Date(log.ts).toLocaleTimeString()}
+                      Actor: <span className="font-mono text-primary">{log.actor}</span> • {formatUtc(log.ts)}
                     </p>
                   </div>
                 ))}
@@ -262,7 +282,7 @@ export function CaseDetailView({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Badge
-                      variant={analysis.recommendation === "FIGHT" ? "success" : "warning"}
+                      variant={recommendationVariant[analysis.recommendation] ?? "outline"}
                       className="text-xs font-bold px-2.5 py-0.5"
                     >
                       RECOMMENDATION: {analysis.recommendation}
@@ -283,11 +303,17 @@ export function CaseDetailView({
                   <div className="text-muted-foreground font-sans font-medium text-xs mb-1">
                     Expected Value Cost Math (Deterministic Code):
                   </div>
-                  <div>Expected Loss (Fight): <strong>{formatMoney(analysis.fightLossMinor, "USD")}</strong> (includes fees & effort)</div>
-                  <div>Loss If Refunded: <strong>{formatMoney(analysis.refundLossMinor, "USD")}</strong></div>
-                  <div className="text-emerald-700 font-semibold pt-1">
-                    Net Expected Advantage: {formatMoney(analysis.refundLossMinor - analysis.fightLossMinor, "USD")}
-                  </div>
+                  <div>Expected Loss (Fight): <strong>{formatMoney(analysis.fightLossMinor, dispute.currency)}</strong> (includes fees & effort)</div>
+                  <div>Loss If Refunded: <strong>{formatMoney(analysis.refundLossMinor, dispute.currency)}</strong></div>
+                  {analysis.refundLossMinor - analysis.fightLossMinor >= 0 ? (
+                    <div className="text-emerald-700 font-semibold pt-1">
+                      Fighting saves (expected): {formatMoney(analysis.refundLossMinor - analysis.fightLossMinor, dispute.currency)}
+                    </div>
+                  ) : (
+                    <div className="text-amber-700 font-semibold pt-1">
+                      Fighting costs more (expected): {formatMoney(analysis.fightLossMinor - analysis.refundLossMinor, dispute.currency)}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -305,11 +331,28 @@ export function CaseDetailView({
                   Every claim is strictly cited to verified fact IDs. Click any chip to inspect source.
                 </p>
               </div>
-              <Badge variant="outline" className="text-[10px] font-mono">
-                Model: {analysis?.model || "gemini-1.5-flash"}
-              </Badge>
+              {analysis?.model && (
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  Model: {analysis.model}
+                </Badge>
+              )}
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
+              {groundingErrors.length > 0 && (
+                <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1.5">
+                  <p className="font-semibold text-destructive flex items-center gap-1.5">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Approval blocked: fix these grounding issues first
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-foreground">
+                    {groundingErrors.map((err, idx) => (
+                      <li key={idx}>
+                        <span className="font-mono text-[10px] text-destructive">{err.code}</span> {err.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {parsedDraftBody ? (
                 <div className="space-y-4">
                   <div className="p-3 bg-muted/30 rounded-md border text-muted-foreground italic">
@@ -331,7 +374,9 @@ export function CaseDetailView({
                             {p.claimRefs.map((ref) => (
                               <button
                                 key={ref}
-                                onClick={() => setSelectedFactId(ref)}
+                                type="button"
+                                onClick={() => showFact(ref)}
+                                aria-label={`Show source fact ${ref}`}
                                 className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${
                                   selectedFactId === ref
                                     ? "bg-primary text-primary-foreground border-primary"
@@ -445,20 +490,30 @@ export function CaseDetailView({
 
               <Button
                 onClick={() => setShowApprovalModal(true)}
-                disabled={draft?.groundingStatus === "fail" || submitSuccess}
+                disabled={!draft || !groundingPassed}
                 className="w-full gap-2 text-xs font-semibold"
-                variant={submitSuccess ? "outline" : "default"}
               >
                 <Send className="h-3.5 w-3.5" />
-                {submitSuccess ? "Evidence Submitted" : "Review & Approve Submission"}
+                Review & Approve Submission
               </Button>
+              {!draft && (
+                <p className="text-[11px] text-muted-foreground">Approval unlocks once an evidence draft exists.</p>
+              )}
+              {draft && !groundingPassed && (
+                <p className="text-[11px] text-destructive">
+                  Approval is blocked until the draft passes grounding.
+                </p>
+              )}
 
               <div className="pt-2 border-t space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Refund and accept are not connected to PayPal yet.
+                </p>
                 <Button
                   variant="outline"
                   size="sm"
                   className="w-full justify-start text-xs text-muted-foreground gap-2"
-                  disabled={submitSuccess}
+                  disabled
                 >
                   <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
                   Refund Dispute ({formatMoney(dispute.amountMinor, dispute.currency)})
@@ -467,7 +522,7 @@ export function CaseDetailView({
                   variant="outline"
                   size="sm"
                   className="w-full justify-start text-xs text-muted-foreground gap-2"
-                  disabled={submitSuccess}
+                  disabled
                 >
                   <XCircle className="h-3.5 w-3.5 text-destructive" />
                   Accept Buyer Claim
@@ -490,20 +545,51 @@ export function CaseDetailView({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 text-xs border rounded-lg p-3 bg-muted/20 font-mono">
-          <div><strong>Dispute ID:</strong> {dispute.paypalDisputeId}</div>
-          <div><strong>Evidence Type:</strong> {draft?.evidenceType || "PROOF_OF_FULFILLMENT"}</div>
-          <div><strong>Tracking:</strong> {order?.carrier} - {order?.trackingNumber}</div>
-          <div><strong>Cited Fact IDs:</strong> {facts.map(f => f.id).join(", ")}</div>
-          <div><strong>Grounding Status:</strong> PASS (All entities verified)</div>
-        </div>
+        <dl className="space-y-2 text-xs border rounded-lg p-3 bg-muted/20">
+          <div>
+            <dt className="font-semibold">Dispute ID</dt>
+            <dd className="font-mono">{dispute.paypalDisputeId}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Evidence type</dt>
+            <dd className="font-mono">{draft?.evidenceType ?? "—"}</dd>
+          </div>
+          {order?.carrier && order.trackingNumber && (
+            <div>
+              <dt className="font-semibold">Tracking</dt>
+              <dd className="font-mono">
+                {order.carrier} · {order.trackingNumber}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt className="font-semibold">Notes sent to PayPal</dt>
+            <dd className="whitespace-pre-wrap">{draft?.notesText || "—"}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Cited facts ({citedFactIds.length})</dt>
+            <dd className="font-mono">{citedFactIds.length > 0 ? citedFactIds.join(", ") : "—"}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Grounding</dt>
+            <dd>
+              {groundingPassed
+                ? "Passed"
+                : `Not passed (${draft?.groundingStatus ?? "no draft"})`}
+            </dd>
+          </div>
+        </dl>
+
+        <p className="text-xs text-muted-foreground">
+          Sending to PayPal is not connected yet, so nothing will be submitted from this screen.
+        </p>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setShowApprovalModal(false)} disabled={isSubmitting}>
+          <Button variant="outline" onClick={() => setShowApprovalModal(false)}>
             Cancel
           </Button>
-          <Button onClick={handleApproveAndSubmit} disabled={isSubmitting} className="gap-2">
-            {isSubmitting ? "Transmitting to PayPal..." : "Confirm & Submit to PayPal"}
+          <Button disabled className="gap-2">
+            Confirm & Submit to PayPal
           </Button>
         </DialogFooter>
       </Dialog>
