@@ -99,6 +99,11 @@ export function CaseDetailView({
     }
   }
 
+  const showFact = (factId: string) => {
+    setSelectedFactId(factId);
+    document.getElementById(`fact-${factId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   let groundingErrors: GroundingError[] = [];
   if (draft?.groundingErrorsJson) {
     try {
@@ -369,7 +374,9 @@ export function CaseDetailView({
                             {p.claimRefs.map((ref) => (
                               <button
                                 key={ref}
-                                onClick={() => setSelectedFactId(ref)}
+                                type="button"
+                                onClick={() => showFact(ref)}
+                                aria-label={`Show source fact ${ref}`}
                                 className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${
                                   selectedFactId === ref
                                     ? "bg-primary text-primary-foreground border-primary"
