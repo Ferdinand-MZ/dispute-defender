@@ -3,6 +3,7 @@ import {
   listSandboxDisputes,
   getSandboxDispute,
   provideDisputeEvidence,
+  adjudicateSandboxDispute,
 } from "./disputes";
 
 describe("PayPal Customer Disputes v1 API Integration", () => {
@@ -104,5 +105,66 @@ describe("PayPal Customer Disputes v1 API Integration", () => {
         approvedBy: "Merchant Admin",
       })
     ).rejects.toThrow("Cannot provide evidence");
+  });
+  it("sends adjudication_outcome when settling a sandbox dispute", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    global.fetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+      if (url.includes("/oauth2/token")) {
+        return { ok: true, status: 200, json: async () => ({ access_token: "T", expires_in: 3600 }) };
+      }
+      calls.push({ url, init });
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({}) };
+    });
+
+    await adjudicateSandboxDispute("PP-D-ADJ", "SELLER_FAVOR", "Merchant Admin");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain("/v1/customer/disputes/PP-D-ADJ/adjudicate");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ adjudication_outcome: "SELLER_FAVOR" });
+  });
+
+  it("refuses to adjudicate without explicit authorization", async () => {
+    await expect(adjudicateSandboxDispute("PP-D-ADJ", "BUYER_FAVOR")).rejects.toThrow("SECURITY_VIOLATION");
+  });
+  it("submits evidence as multipart with a JSON input part", async () => {
+    const posts: RequestInit[] = [];
+    global.fetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+      if (url.includes("/oauth2/token")) {
+        return { ok: true, status: 200, json: async () => ({ access_token: "T", expires_in: 3600 }) };
+      }
+      if (init?.method === "POST") {
+        posts.push(init);
+        return { ok: true, status: 200, headers: new Headers(), json: async () => ({}) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          dispute_id: "PP-D-EV",
+          reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+          status: "WAITING_FOR_SELLER_RESPONSE",
+          dispute_amount: { currency_code: "USD", value: "48.00" },
+        }),
+      };
+    });
+
+    const evidencePayload = {
+      evidences: [
+        {
+          evidence_type: "PROOF_OF_FULFILLMENT" as const,
+          evidence_info: { tracking_info: [{ carrier_name: "FEDEX", tracking_number: "122533485" }] },
+        },
+      ],
+    };
+    await provideDisputeEvidence({ disputeId: "PP-D-EV", evidencePayload, approvedBy: "Merchant Admin" });
+
+    expect(posts).toHaveLength(1);
+    const body = posts[0].body;
+    expect(body).toBeInstanceOf(FormData);
+    const input = (body as FormData).get("input");
+    expect(input).toBeInstanceOf(Blob);
+    expect(JSON.parse(await (input as Blob).text())).toEqual(evidencePayload);
+    expect((body as FormData).get("evidence-file")).toBeNull();
   });
 });
