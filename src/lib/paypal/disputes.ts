@@ -121,13 +121,15 @@ export async function provideDisputeEvidence({
   }
 }
 
+export type AdjudicationOutcome = "BUYER_FAVOR" | "SELLER_FAVOR";
+
 /**
  * Settle and close a dispute in Sandbox environment (simulation helper).
- * Calls POST /v1/customer/disputes/{id}/adjudicate
+ * Calls POST /v1/customer/disputes/{id}/adjudicate. The dispute must be UNDER_REVIEW.
  */
 export async function adjudicateSandboxDispute(
   disputeId: string,
-  adjudicationType: "REVERT_PAYMENT" = "REVERT_PAYMENT",
+  outcome: AdjudicationOutcome,
   approvedBy?: string
 ): Promise<void> {
   if (!disputeId) {
@@ -141,7 +143,7 @@ export async function adjudicateSandboxDispute(
   const endpoint = `/v1/customer/disputes/${encodeURIComponent(disputeId)}/adjudicate`;
   await payPalRequest<void>(endpoint, {
     method: "POST",
-    body: JSON.stringify({ adjudication_type: adjudicationType }),
+    body: JSON.stringify({ adjudication_outcome: outcome }),
   });
 }
 
