@@ -1,11 +1,14 @@
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import { seed } from "../src/lib/db/seed";
 
 async function main() {
   console.log("🔄 Resetting DisputeDefender database for demo...");
 
-  const dbPath = path.resolve(process.cwd(), "./data/app.db");
+  const dbPath = path.resolve(
+    process.cwd(),
+    process.env.DATABASE_URL?.replace("file:", "") || "./data/app.db"
+  );
   const dbDir = path.dirname(dbPath);
 
   // If database files exist, remove them
@@ -28,11 +31,11 @@ async function main() {
   }
 
   // Run schema push / initialization
-  const { execSync } = await import("child_process");
   console.log("Applying database schema via drizzle-kit push...");
-  execSync("pnpm drizzle-kit push", { stdio: "inherit" });
+  execSync("pnpm exec drizzle-kit push --force", { stdio: "inherit" });
 
-  // Seed demo data
+  // Import the seed only now: importing it opens the DB, which must happen after the reset.
+  const { seed } = await import("../src/lib/db/seed");
   await seed();
 
   console.log("\n==========================================================");
