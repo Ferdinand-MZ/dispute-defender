@@ -1,8 +1,14 @@
 "use client";
 
 import { useMemo, useCallback } from "react";
-import { AgGridReact } from "ag-grid-react";
-import { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
+import { AgGridProvider, AgGridReact } from "ag-grid-react";
+import {
+  AllCommunityModule,
+  ColDef,
+  ICellRendererParams,
+  RowClickedEvent,
+  themeQuartz,
+} from "ag-grid-community";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +27,22 @@ export interface CaseRow {
   strengthScore: number | null;
   pWinBand: string | null;
 }
+
+const gridModules = [AllCommunityModule];
+
+// Map the grid onto the app's design tokens instead of AG Grid's default blue.
+const gridTheme = themeQuartz.withParams({
+  fontFamily: "inherit",
+  accentColor: "hsl(var(--primary))",
+  foregroundColor: "hsl(var(--foreground))",
+  backgroundColor: "hsl(var(--card))",
+  borderColor: "hsl(var(--border))",
+  headerBackgroundColor: "hsl(var(--muted))",
+  headerTextColor: "hsl(var(--muted-foreground))",
+  headerFontWeight: 600,
+  rowHoverColor: "hsl(var(--accent))",
+  wrapperBorderRadius: 8,
+});
 
 interface CasesGridProps {
   rowData: CaseRow[];
@@ -175,15 +197,17 @@ export function CasesGrid({ rowData }: CasesGridProps) {
   }, []);
 
   return (
-    <div className="ag-theme-quartz w-full h-[520px] rounded-lg border border-border shadow-xs overflow-hidden">
-      <AgGridReact<CaseRow>
-        rowData={rowData}
-        columnDefs={columnDefs}
-        defaultColDef={defaultColDef}
-        rowSelection="single"
-        animateRows={true}
-        onRowClicked={onRowClicked}
-      />
-    </div>
+    <AgGridProvider modules={gridModules}>
+      <div className="w-full h-[520px]">
+        <AgGridReact<CaseRow>
+          theme={gridTheme}
+          rowData={rowData}
+          columnDefs={columnDefs}
+          defaultColDef={defaultColDef}
+          animateRows={true}
+          onRowClicked={onRowClicked}
+        />
+      </div>
+    </AgGridProvider>
   );
 }
