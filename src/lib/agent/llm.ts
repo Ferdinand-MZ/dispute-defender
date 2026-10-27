@@ -20,12 +20,18 @@ export function getAIModel() {
     );
   }
 
-  // Default to Google Generative AI (Gemini) as specified
+  // Only the Google provider package is installed; fail loudly instead of silently using Gemini.
+  if (env.AI_PROVIDER !== "google") {
+    throw new AIProviderNotConfiguredError(
+      `AI_PROVIDER '${env.AI_PROVIDER}' is not installed. Use AI_PROVIDER=google or add the provider package.`
+    );
+  }
+
   const google = createGoogleGenerativeAI({
     apiKey: env.AI_API_KEY,
   });
 
-  return google(env.AI_MODEL || "gemini-1.5-flash");
+  return google(env.AI_MODEL);
 }
 
 export interface GenerateStructuredOptions<T extends z.ZodTypeAny> {
