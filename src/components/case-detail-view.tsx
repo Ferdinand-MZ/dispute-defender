@@ -71,8 +71,6 @@ export function CaseDetailView({
 }: CaseDetailViewProps) {
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
 
   // Parse draft body JSON if present
   let parsedDraftBody: {
@@ -119,16 +117,6 @@ export function CaseDetailView({
   const paragraphCount =
     parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
 
-  const handleApproveAndSubmit = async () => {
-    setIsSubmitting(true);
-    // Simulate approval and submission in foundation phase
-    setTimeout(() => {
-      setIsSubmitting(false);
-      setSubmitSuccess(true);
-      setShowApprovalModal(false);
-    }, 1200);
-  };
-
   return (
     <div className="space-y-6">
       {/* Top Breadcrumb & Status Bar */}
@@ -155,7 +143,7 @@ export function CaseDetailView({
             }
             className="font-mono text-xs uppercase"
           >
-            {submitSuccess ? "SUBMITTED" : dispute.caseState}
+            {dispute.caseState}
           </Badge>
         </div>
 
@@ -179,17 +167,6 @@ export function CaseDetailView({
           )}
         </div>
       </div>
-
-      {submitSuccess && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-emerald-900 text-sm flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0" />
-            <span>
-              <strong>Evidence Packet Submitted Successfully (Simulation).</strong> Recorded in actions and audit log. Case updated to <code>SUBMITTED</code>.
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* 3-Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -506,12 +483,11 @@ export function CaseDetailView({
 
               <Button
                 onClick={() => setShowApprovalModal(true)}
-                disabled={!draft || !groundingPassed || submitSuccess}
+                disabled={!draft || !groundingPassed}
                 className="w-full gap-2 text-xs font-semibold"
-                variant={submitSuccess ? "outline" : "default"}
               >
                 <Send className="h-3.5 w-3.5" />
-                {submitSuccess ? "Evidence Submitted" : "Review & Approve Submission"}
+                Review & Approve Submission
               </Button>
               {!draft && (
                 <p className="text-[11px] text-muted-foreground">Approval unlocks once an evidence draft exists.</p>
@@ -523,11 +499,14 @@ export function CaseDetailView({
               )}
 
               <div className="pt-2 border-t space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Refund and accept are not connected to PayPal yet.
+                </p>
                 <Button
                   variant="outline"
                   size="sm"
                   className="w-full justify-start text-xs text-muted-foreground gap-2"
-                  disabled={submitSuccess}
+                  disabled
                 >
                   <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
                   Refund Dispute ({formatMoney(dispute.amountMinor, dispute.currency)})
@@ -536,7 +515,7 @@ export function CaseDetailView({
                   variant="outline"
                   size="sm"
                   className="w-full justify-start text-xs text-muted-foreground gap-2"
-                  disabled={submitSuccess}
+                  disabled
                 >
                   <XCircle className="h-3.5 w-3.5 text-destructive" />
                   Accept Buyer Claim
@@ -594,12 +573,16 @@ export function CaseDetailView({
           </div>
         </dl>
 
+        <p className="text-xs text-muted-foreground">
+          Sending to PayPal is not connected yet, so nothing will be submitted from this screen.
+        </p>
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => setShowApprovalModal(false)} disabled={isSubmitting}>
+          <Button variant="outline" onClick={() => setShowApprovalModal(false)}>
             Cancel
           </Button>
-          <Button onClick={handleApproveAndSubmit} disabled={isSubmitting} className="gap-2">
-            {isSubmitting ? "Transmitting to PayPal..." : "Confirm & Submit to PayPal"}
+          <Button disabled className="gap-2">
+            Confirm & Submit to PayPal
           </Button>
         </DialogFooter>
       </Dialog>
