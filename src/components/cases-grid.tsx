@@ -1,17 +1,22 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { AgGridProvider, AgGridReact } from "ag-grid-react";
 import {
   AllCommunityModule,
   ColDef,
   ICellRendererParams,
+  GridApi,
+  GridReadyEvent,
+  RowClassRules,
   RowClickedEvent,
   themeQuartz,
 } from "ag-grid-community";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
+import { getDeadlineStatus, Urgency } from "@/lib/deadline";
+import { cn } from "@/lib/utils";
 
 export interface CaseRow {
   paypalDisputeId: string;
@@ -44,12 +49,66 @@ const gridTheme = themeQuartz.withParams({
   wrapperBorderRadius: 8,
 });
 
+const TICK_MS = 30_000;
+
+/** Current time that re-renders the caller every TICK_MS, so countdowns stay live. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+const urgencyStyles: Record<Urgency, string> = {
+  expired: "bg-destructive/10 text-destructive border-destructive/30",
+  critical: "bg-red-50 text-red-700 border-red-200",
+  urgent: "bg-amber-50 text-amber-800 border-amber-200",
+  normal: "text-muted-foreground border-transparent",
+};
+
+function DeadlineCell({ value }: ICellRendererParams<CaseRow, string | null>) {
+  const now = useNow();
+  if (!value) return <span className="text-muted-foreground">—</span>;
+
+  const status = getDeadlineStatus(value, now);
+  return (
+    <span
+      className={cn("rounded border px-2 py-0.5 text-xs font-semibold", urgencyStyles[status.urgency])}
+      title={new Date(value).toUTCString()}
+    >
+      {status.urgency === "urgent" || status.urgency === "critical" ? `Urgent · ${status.label}` : status.label}
+    </span>
+  );
+}
+
+const rowClassRules: RowClassRules<CaseRow> = {
+  "row-urgency-expired": (p) =>
+    !!p.data?.sellerResponseDueAt && getDeadlineStatus(p.data.sellerResponseDueAt).urgency === "expired",
+  "row-urgency-critical": (p) =>
+    !!p.data?.sellerResponseDueAt && getDeadlineStatus(p.data.sellerResponseDueAt).urgency === "critical",
+  "row-urgency-urgent": (p) =>
+    !!p.data?.sellerResponseDueAt && getDeadlineStatus(p.data.sellerResponseDueAt).urgency === "urgent",
+};
+
 interface CasesGridProps {
   rowData: CaseRow[];
 }
 
 export function CasesGrid({ rowData }: CasesGridProps) {
   const router = useRouter();
+  const gridApiRef = useRef<GridApi<CaseRow> | null>(null);
+
+  const onGridReady = useCallback((event: GridReadyEvent<CaseRow>) => {
+    gridApiRef.current = event.api;
+  }, []);
+
+  // Row highlight classes depend on the clock, so re-evaluate them on the same tick as the countdown.
+  useEffect(() => {
+    const id = setInterval(() => gridApiRef.current?.redrawRows(), TICK_MS);
+    return () => clearInterval(id);
+  }, []);
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<CaseRow>) => {
@@ -126,29 +185,16 @@ export function CasesGrid({ rowData }: CasesGridProps) {
         headerName: "Response Deadline",
         field: "sellerResponseDueAt",
         sortable: true,
-        width: 170,
-        cellRenderer: (params: ICellRendererParams<CaseRow>) => {
-          if (!params.value) return <span className="text-muted-foreground">—</span>;
-
-          const due = new Date(params.value).getTime();
-          const now = Date.now();
-          const diffHours = Math.round((due - now) / (1000 * 60 * 60));
-
-          if (diffHours < 0) {
-            return <span className="text-destructive font-semibold text-xs">EXPIRED</span>;
-          }
-
-          if (diffHours <= 48) {
-            return (
-              <span className="text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-xs font-semibold">
-                ⚠️ {diffHours}h remaining
-              </span>
-            );
-          }
-
-          const diffDays = Math.round(diffHours / 24);
-          return <span className="text-muted-foreground text-xs">{diffDays} days remaining</span>;
+        sort: "asc",
+        width: 190,
+        // ISO strings sort chronologically; cases without a deadline go last.
+        comparator: (a: string | null, b: string | null) => {
+          if (a === b) return 0;
+          if (!a) return 1;
+          if (!b) return -1;
+          return a < b ? -1 : 1;
         },
+        cellRenderer: DeadlineCell,
       },
       {
         headerName: "AI Recommendation",
@@ -205,6 +251,8 @@ export function CasesGrid({ rowData }: CasesGridProps) {
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
           animateRows={true}
+          rowClassRules={rowClassRules}
+          onGridReady={onGridReady}
           onRowClicked={onRowClicked}
         />
       </div>
