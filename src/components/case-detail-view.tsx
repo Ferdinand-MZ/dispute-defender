@@ -32,6 +32,23 @@ import {
   XCircle,
 } from "lucide-react";
 import type { Dispute, Order, Fact, Analysis, Draft, Action, AuditLogEntry } from "@/lib/db/schema";
+import type { GroundingError } from "@/lib/agent/grounding";
+
+// Fixed locale and UTC so server and browser render identical text (no hydration mismatch).
+const dateTimeFormat = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "UTC",
+});
+function formatUtc(iso: string): string {
+  return `${dateTimeFormat.format(new Date(iso))} UTC`;
+}
+
+const recommendationVariant: Record<string, "success" | "warning" | "destructive"> = {
+  FIGHT: "success",
+  REFUND: "warning",
+  ACCEPT: "destructive",
+};
 
 interface CaseDetailViewProps {
   dispute: Dispute;
@@ -84,6 +101,24 @@ export function CaseDetailView({
     }
   }
 
+  let groundingErrors: GroundingError[] = [];
+  if (draft?.groundingErrorsJson) {
+    try {
+      groundingErrors = JSON.parse(draft.groundingErrorsJson);
+    } catch {
+      groundingErrors = [];
+    }
+  }
+
+  const groundingPassed = draft?.groundingStatus === "pass" || draft?.groundingStatus === "edited_pass";
+  const citedFactIds = Array.from(
+    new Set(
+      parsedDraftBody?.sections?.flatMap((section) => section.paragraphs.flatMap((p) => p.claimRefs)) ?? []
+    )
+  );
+  const paragraphCount =
+    parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
+
   const handleApproveAndSubmit = async () => {
     setIsSubmitting(true);
     // Simulate approval and submission in foundation phase
@@ -125,16 +160,21 @@ export function CaseDetailView({
         </div>
 
         <div className="flex items-center gap-2">
-          {draft && draft.groundingStatus === "pass" && (
+          {draft && groundingPassed && (
             <Badge variant="success" className="gap-1 text-xs">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Grounding Passed (100% cited)
+              Grounding passed · {paragraphCount} paragraphs, {citedFactIds.length} facts cited
             </Badge>
           )}
           {draft && draft.groundingStatus === "fail" && (
             <Badge variant="destructive" className="gap-1 text-xs">
               <ShieldAlert className="h-3.5 w-3.5" />
-              Grounding Failed
+              Grounding failed · {groundingErrors.length} {groundingErrors.length === 1 ? "issue" : "issues"}
+            </Badge>
+          )}
+          {!draft && (
+            <Badge variant="outline" className="text-xs">
+              No draft yet
             </Badge>
           )}
         </div>
@@ -180,9 +220,7 @@ export function CaseDetailView({
                 <span className="text-muted-foreground">Response Deadline:</span>
                 <p className="font-medium text-foreground flex items-center gap-1 mt-0.5">
                   <Clock className="h-3.5 w-3.5 text-amber-600" />
-                  {dispute.sellerResponseDueAt
-                    ? new Date(dispute.sellerResponseDueAt).toLocaleString()
-                    : "No deadline specified"}
+                  {dispute.sellerResponseDueAt ? formatUtc(dispute.sellerResponseDueAt) : "No deadline specified"}
                 </p>
               </div>
             </CardContent>
@@ -244,7 +282,7 @@ export function CaseDetailView({
                     <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-primary" />
                     <p className="font-semibold text-foreground">{log.action}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      Actor: <span className="font-mono text-primary">{log.actor}</span> • {new Date(log.ts).toLocaleTimeString()}
+                      Actor: <span className="font-mono text-primary">{log.actor}</span> • {formatUtc(log.ts)}
                     </p>
                   </div>
                 ))}
@@ -262,7 +300,7 @@ export function CaseDetailView({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Badge
-                      variant={analysis.recommendation === "FIGHT" ? "success" : "warning"}
+                      variant={recommendationVariant[analysis.recommendation] ?? "outline"}
                       className="text-xs font-bold px-2.5 py-0.5"
                     >
                       RECOMMENDATION: {analysis.recommendation}
@@ -283,11 +321,17 @@ export function CaseDetailView({
                   <div className="text-muted-foreground font-sans font-medium text-xs mb-1">
                     Expected Value Cost Math (Deterministic Code):
                   </div>
-                  <div>Expected Loss (Fight): <strong>{formatMoney(analysis.fightLossMinor, "USD")}</strong> (includes fees & effort)</div>
-                  <div>Loss If Refunded: <strong>{formatMoney(analysis.refundLossMinor, "USD")}</strong></div>
-                  <div className="text-emerald-700 font-semibold pt-1">
-                    Net Expected Advantage: {formatMoney(analysis.refundLossMinor - analysis.fightLossMinor, "USD")}
-                  </div>
+                  <div>Expected Loss (Fight): <strong>{formatMoney(analysis.fightLossMinor, dispute.currency)}</strong> (includes fees & effort)</div>
+                  <div>Loss If Refunded: <strong>{formatMoney(analysis.refundLossMinor, dispute.currency)}</strong></div>
+                  {analysis.refundLossMinor - analysis.fightLossMinor >= 0 ? (
+                    <div className="text-emerald-700 font-semibold pt-1">
+                      Fighting saves (expected): {formatMoney(analysis.refundLossMinor - analysis.fightLossMinor, dispute.currency)}
+                    </div>
+                  ) : (
+                    <div className="text-amber-700 font-semibold pt-1">
+                      Fighting costs more (expected): {formatMoney(analysis.fightLossMinor - analysis.refundLossMinor, dispute.currency)}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -305,9 +349,11 @@ export function CaseDetailView({
                   Every claim is strictly cited to verified fact IDs. Click any chip to inspect source.
                 </p>
               </div>
-              <Badge variant="outline" className="text-[10px] font-mono">
-                Model: {analysis?.model || "gemini-1.5-flash"}
-              </Badge>
+              {analysis?.model && (
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  Model: {analysis.model}
+                </Badge>
+              )}
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
               {parsedDraftBody ? (
