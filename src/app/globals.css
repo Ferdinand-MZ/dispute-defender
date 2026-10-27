@@ -2,9 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import "ag-grid-community/styles/ag-grid.css";
-@import "ag-grid-community/styles/ag-theme-quartz.css";
-
 @layer base {
   :root {
     --background: 220 20% 97%;
@@ -75,5 +72,18 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* Case queue: urgency is shown as text in the deadline cell; the row edge repeats it for scanning. */
+@layer components {
+  .row-urgency-expired .ag-cell[col-id="paypalDisputeId"] {
+    box-shadow: inset 3px 0 0 hsl(var(--destructive));
+  }
+  .row-urgency-critical .ag-cell[col-id="paypalDisputeId"] {
+    box-shadow: inset 3px 0 0 rgb(220 38 38);
+  }
+  .row-urgency-urgent .ag-cell[col-id="paypalDisputeId"] {
+    box-shadow: inset 3px 0 0 rgb(217 119 6);
   }
 }
