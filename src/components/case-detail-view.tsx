@@ -506,13 +506,21 @@ export function CaseDetailView({
 
               <Button
                 onClick={() => setShowApprovalModal(true)}
-                disabled={draft?.groundingStatus === "fail" || submitSuccess}
+                disabled={!draft || !groundingPassed || submitSuccess}
                 className="w-full gap-2 text-xs font-semibold"
                 variant={submitSuccess ? "outline" : "default"}
               >
                 <Send className="h-3.5 w-3.5" />
                 {submitSuccess ? "Evidence Submitted" : "Review & Approve Submission"}
               </Button>
+              {!draft && (
+                <p className="text-[11px] text-muted-foreground">Approval unlocks once an evidence draft exists.</p>
+              )}
+              {draft && !groundingPassed && (
+                <p className="text-[11px] text-destructive">
+                  Approval is blocked until the draft passes grounding.
+                </p>
+              )}
 
               <div className="pt-2 border-t space-y-2">
                 <Button
