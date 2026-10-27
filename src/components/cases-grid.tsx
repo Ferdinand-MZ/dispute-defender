@@ -238,7 +238,7 @@ export function CasesGrid({ rowData }: CasesGridProps) {
 
           return (
             <div className="flex items-center h-full">
-              <Badge variant={variant} className="text-[10px] font-mono uppercase">
+              <Badge variant={variant} className="text-[10px] leading-4 font-mono uppercase">
                 {state}
               </Badge>
             </div>
@@ -274,7 +274,7 @@ export function CasesGrid({ rowData }: CasesGridProps) {
           if (rec === "FIGHT") {
             return (
               <div className="flex items-center gap-1.5 h-full">
-                <Badge variant="success" className="text-[10px] font-bold">FIGHT</Badge>
+                <Badge variant="success" className="text-[10px] leading-4 font-bold">FIGHT</Badge>
                 {params.data?.strengthScore !== null && (
                   <span className="text-[11px] text-muted-foreground">({params.data?.strengthScore}%)</span>
                 )}
@@ -285,14 +285,14 @@ export function CasesGrid({ rowData }: CasesGridProps) {
           if (rec === "REFUND") {
             return (
               <div className="flex items-center gap-1.5 h-full">
-                <Badge variant="warning" className="text-[10px] font-bold">REFUND</Badge>
+                <Badge variant="warning" className="text-[10px] leading-4 font-bold">REFUND</Badge>
               </div>
             );
           }
 
           return (
             <div className="flex items-center gap-1.5 h-full">
-              <Badge variant="destructive" className="text-[10px] font-bold">ACCEPT</Badge>
+              <Badge variant="destructive" className="text-[10px] leading-4 font-bold">ACCEPT</Badge>
             </div>
           );
         },

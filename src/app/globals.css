@@ -77,13 +77,13 @@
 
 /* Case queue: urgency is shown as text in the deadline cell; the row edge repeats it for scanning. */
 @layer components {
-  .row-urgency-expired {
+  .row-urgency-expired .ag-cell[col-id="paypalDisputeId"] {
     box-shadow: inset 3px 0 0 hsl(var(--destructive));
   }
-  .row-urgency-critical {
+  .row-urgency-critical .ag-cell[col-id="paypalDisputeId"] {
     box-shadow: inset 3px 0 0 rgb(220 38 38);
   }
-  .row-urgency-urgent {
+  .row-urgency-urgent .ag-cell[col-id="paypalDisputeId"] {
     box-shadow: inset 3px 0 0 rgb(217 119 6);
   }
 }
