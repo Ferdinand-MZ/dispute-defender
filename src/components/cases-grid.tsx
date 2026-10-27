@@ -8,6 +8,7 @@ import {
   ColDef,
   FullWidthCellKeyDownEvent,
   ICellRendererParams,
+  GetRowIdParams,
   GridApi,
   GridReadyEvent,
   RowClassRules,
@@ -55,6 +56,7 @@ const gridTheme = themeQuartz.withParams({
 });
 
 const TICK_MS = 30_000;
+const REFRESH_MS = 15_000;
 
 /** Current time that re-renders the caller every TICK_MS, so countdowns stay live. */
 function useNow(): number {
@@ -114,6 +116,36 @@ export function CasesGrid({ rowData }: CasesGridProps) {
     const id = setInterval(() => gridApiRef.current?.redrawRows(), TICK_MS);
     return () => clearInterval(id);
   }, []);
+
+  // Re-fetch the server component so disputes created by the webhook show up without a manual reload (US1).
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      router.refresh();
+      setLastRefreshed(new Date());
+    }, REFRESH_MS);
+    return () => clearInterval(id);
+  }, [router]);
+
+  // Flash rows that were not in the previous render, so a new dispute is easy to spot.
+  const seenIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(rowData.map((row) => row.paypalDisputeId));
+    const previous = seenIdsRef.current;
+    seenIdsRef.current = ids;
+    const api = gridApiRef.current;
+    if (!previous || !api) return;
+
+    const rowNodes = rowData
+      .filter((row) => !previous.has(row.paypalDisputeId))
+      .map((row) => api.getRowNode(row.paypalDisputeId))
+      .filter((node) => node !== undefined);
+    if (rowNodes.length > 0) {
+      api.flashCells({ rowNodes, flashDuration: 2000, fadeDuration: 1000 });
+    }
+  }, [rowData]);
+
+  const getRowId = useCallback((params: GetRowIdParams<CaseRow>) => params.data.paypalDisputeId, []);
 
   const [quickFilter, setQuickFilter] = useState("");
 
@@ -304,10 +336,16 @@ export function CasesGrid({ rowData }: CasesGridProps) {
             className="h-9 w-full rounded-md border border-input bg-card pl-8 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </label>
-        <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={exportCsv}>
-          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-          Export CSV
-        </Button>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground" aria-live="polite">
+            Auto-refresh every {REFRESH_MS / 1000}s
+            {lastRefreshed ? ` · updated ${lastRefreshed.toLocaleTimeString()}` : ""}
+          </span>
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={exportCsv}>
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            Export CSV
+          </Button>
+        </div>
       </div>
       <div className="w-full h-[520px]">
         <AgGridReact<CaseRow>
@@ -317,6 +355,7 @@ export function CasesGrid({ rowData }: CasesGridProps) {
           defaultColDef={defaultColDef}
           animateRows={true}
           rowClassRules={rowClassRules}
+          getRowId={getRowId}
           quickFilterText={quickFilter}
           onGridReady={onGridReady}
           onRowClicked={onRowClicked}

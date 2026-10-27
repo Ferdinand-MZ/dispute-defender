@@ -45,12 +45,8 @@ export default async function CasesPage() {
       <CasesGrid rowData={casesData as CaseRow[]} />
 
       {/* Footer Info */}
-      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-        <span>Displaying {casesData.length} disputes from SQLite fact base</span>
-        <span className="flex items-center gap-1.5 font-mono text-[11px]">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          Realtime Webhook Intake Ready
-        </span>
+      <div className="text-xs text-muted-foreground px-1">
+        {casesData.length} {casesData.length === 1 ? "dispute" : "disputes"}
       </div>
     </div>
   );
