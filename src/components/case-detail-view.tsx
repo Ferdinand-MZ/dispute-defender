@@ -356,6 +356,21 @@ export function CaseDetailView({
               )}
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
+              {groundingErrors.length > 0 && (
+                <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1.5">
+                  <p className="font-semibold text-destructive flex items-center gap-1.5">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Approval blocked: fix these grounding issues first
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-foreground">
+                    {groundingErrors.map((err, idx) => (
+                      <li key={idx}>
+                        <span className="font-mono text-[10px] text-destructive">{err.code}</span> {err.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {parsedDraftBody ? (
                 <div className="space-y-4">
                   <div className="p-3 bg-muted/30 rounded-md border text-muted-foreground italic">
@@ -536,13 +551,40 @@ export function CaseDetailView({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 text-xs border rounded-lg p-3 bg-muted/20 font-mono">
-          <div><strong>Dispute ID:</strong> {dispute.paypalDisputeId}</div>
-          <div><strong>Evidence Type:</strong> {draft?.evidenceType || "PROOF_OF_FULFILLMENT"}</div>
-          <div><strong>Tracking:</strong> {order?.carrier} - {order?.trackingNumber}</div>
-          <div><strong>Cited Fact IDs:</strong> {facts.map(f => f.id).join(", ")}</div>
-          <div><strong>Grounding Status:</strong> PASS (All entities verified)</div>
-        </div>
+        <dl className="space-y-2 text-xs border rounded-lg p-3 bg-muted/20">
+          <div>
+            <dt className="font-semibold">Dispute ID</dt>
+            <dd className="font-mono">{dispute.paypalDisputeId}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Evidence type</dt>
+            <dd className="font-mono">{draft?.evidenceType ?? "—"}</dd>
+          </div>
+          {order?.carrier && order.trackingNumber && (
+            <div>
+              <dt className="font-semibold">Tracking</dt>
+              <dd className="font-mono">
+                {order.carrier} · {order.trackingNumber}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt className="font-semibold">Notes sent to PayPal</dt>
+            <dd className="whitespace-pre-wrap">{draft?.notesText || "—"}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Cited facts ({citedFactIds.length})</dt>
+            <dd className="font-mono">{citedFactIds.length > 0 ? citedFactIds.join(", ") : "—"}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold">Grounding</dt>
+            <dd>
+              {groundingPassed
+                ? "Passed"
+                : `Not passed (${draft?.groundingStatus ?? "no draft"})`}
+            </dd>
+          </div>
+        </dl>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => setShowApprovalModal(false)} disabled={isSubmitting}>
