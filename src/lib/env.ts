@@ -34,6 +34,12 @@ const envSchema = z.object({
     .optional()
     .default("false")
     .transform((val) => val === "true"),
+  // Local-only: PayPal simulator events cannot be verified by PayPal. Ignored when NODE_ENV=production.
+  PAYPAL_WEBHOOK_SKIP_VERIFY: z
+    .string()
+    .optional()
+    .default("false")
+    .transform((val) => val === "true"),
 });
 
 export type Env = z.infer<typeof envSchema>;
