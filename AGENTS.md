@@ -50,15 +50,15 @@ Full rationale and design: `02-ARCHITECTURE.md`.
 ## Commands (created in task T02, keep them working)
 
 ```
-npm run dev         # dev server on :3000
-npm run build
-npm run start
-npm run typecheck   # tsc --noEmit
-npm run lint
-npm run test        # vitest run
-npm run db:push     # apply schema
-npm run db:seed     # seed demo store, policies, comms
-npm run demo:reset  # wipe DB and reseed demo data
+pnpm run dev         # dev server on :3000
+pnpm run build
+pnpm run start
+pnpm run typecheck   # tsc --noEmit
+pnpm run lint
+pnpm run test        # vitest run
+pnpm run db:push     # apply schema
+pnpm run db:seed     # seed demo store, policies, comms
+pnpm run demo:reset  # wipe DB and reseed demo data
 ```
 
 ## Repo layout
@@ -93,7 +93,7 @@ fixtures/paypal/             # recorded sandbox responses (sanitized)
 
 ## Definition of done (every task)
 
-1. `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` all pass.
+1. `pnpm run typecheck`, `pnpm run lint`, `pnpm run test`, `pnpm run build` all pass.
 2. The acceptance criteria for the task in `03-PLAN-AND-TASKS.md` are met and you checked them by running the thing.
 3. New env vars are in `.env.example`. Behavior changes are reflected in the docs.
 4. No secrets, no `console.log` leftovers, no TODO without a task id.
