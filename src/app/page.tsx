@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DashboardCharts } from "@/components/dashboard-charts";
 import {
   AlertTriangle,
   ArrowRight,
@@ -134,6 +135,9 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* AG Charts Dashboard Analytics */}
+      <DashboardCharts cases={allDisputes} />
 
       {/* Quick Access & Recent Cases */}
       <div className="grid gap-6 md:grid-cols-3">

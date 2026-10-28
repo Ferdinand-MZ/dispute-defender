@@ -3,12 +3,28 @@ import { env } from "@/lib/env";
 import { db } from "@/lib/db";
 import { disputes } from "@/lib/db/schema";
 import { logAudit } from "@/lib/audit";
-import { eq, and, sql } from "drizzle-orm";
+import { canTransition, transitionState, CaseState } from "@/lib/agent/state";
+import { eq, sql } from "drizzle-orm";
+import crypto from "crypto";
+
+function isCronSecretValid(headerSecret: string | null, expectedSecret: string): boolean {
+  if (!headerSecret || !expectedSecret) return false;
+  const headerBuf = Buffer.from(headerSecret);
+  const expectedBuf = Buffer.from(expectedSecret);
+  if (headerBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(headerBuf, expectedBuf);
+}
 
 export async function POST(req: NextRequest) {
+  // Enforce Issue #8: CRON_SECRET must not use insecure default in production
+  if (process.env.NODE_ENV === "production" && env.CRON_SECRET === "dev-cron-secret") {
+    console.error("[CRON_SECURITY_ERROR] Insecure default CRON_SECRET used in production.");
+    return NextResponse.json({ error: "Unauthorized: Insecure cron secret" }, { status: 401 });
+  }
+
   const secretHeader = req.headers.get("x-cron-secret");
 
-  if (secretHeader !== env.CRON_SECRET) {
+  if (!isCronSecretValid(secretHeader, env.CRON_SECRET)) {
     return NextResponse.json({ error: "Unauthorized: Invalid cron secret" }, { status: 401 });
   }
 
@@ -23,20 +39,29 @@ export async function POST(req: NextRequest) {
 
     let expiredCount = 0;
     for (const d of openDisputes) {
+      // Must ignore disputes that are not waiting for seller response (e.g. resolved in PayPal or under review)
+      if (d.paypalStatus !== "WAITING_FOR_SELLER_RESPONSE") {
+        continue;
+      }
+
       if (d.sellerResponseDueAt && new Date(d.sellerResponseDueAt).getTime() < Date.now()) {
-        await db
-          .update(disputes)
-          .set({ caseState: "EXPIRED", updatedAt: nowIso })
-          .where(eq(disputes.paypalDisputeId, d.paypalDisputeId));
+        const currentState = d.caseState as CaseState;
+        if (canTransition(currentState, "EXPIRED")) {
+          const nextState = transitionState(currentState, "EXPIRED");
+          await db
+            .update(disputes)
+            .set({ caseState: nextState, updatedAt: nowIso })
+            .where(eq(disputes.paypalDisputeId, d.paypalDisputeId));
 
-        await logAudit({
-          actor: "system",
-          disputeId: d.paypalDisputeId,
-          action: "CASE_DEADLINE_EXPIRED",
-          detail: { dueAt: d.sellerResponseDueAt },
-        });
+          await logAudit({
+            actor: "system",
+            disputeId: d.paypalDisputeId,
+            action: "CASE_DEADLINE_EXPIRED",
+            detail: { fromState: currentState, toState: nextState, dueAt: d.sellerResponseDueAt },
+          });
 
-        expiredCount++;
+          expiredCount++;
+        }
       }
     }
 

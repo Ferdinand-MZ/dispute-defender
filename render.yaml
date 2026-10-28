@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: dispute-defender
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build
+    startCommand: pnpm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: DEMO_MODE
+        value: "true"
+      - key: APP_BASE_URL
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: AI_PROVIDER
+        value: google
+      - key: AI_MODEL
+        value: gemini-3.8-flash
+      - key: AI_API_KEY
+        sync: false
+      - key: CRON_SECRET
+        generateValue: true
+      - key: APP_PASSWORD
+        sync: false
+
+  - type: cron
+    name: dispute-defender-cron
+    runtime: image
+    image:
+      url: curlimages/curl:latest
+    schedule: "*/15 * * * *"
+    startCommand: 'curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" "$APP_BASE_URL/api/cron/deadlines"'
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: dispute-defender
+          envVarKey: CRON_SECRET
+      - key: APP_BASE_URL
+        fromService:
+          type: web
+          name: dispute-defender
+          envVarKey: APP_BASE_URL

@@ -1,7 +1,7 @@
 import { getSandboxDispute, provideDisputeEvidence } from "../src/lib/paypal/disputes";
 import { buildEvidencePayload } from "../src/lib/evidence/mapping";
 import { db } from "../src/lib/db";
-import { actions, disputes } from "../src/lib/db/schema";
+import { actions, disputes, facts, orders, drafts } from "../src/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { logAudit } from "../src/lib/audit";
 import { env } from "../src/lib/env";
@@ -30,12 +30,39 @@ async function main() {
   console.log(`  Current Status: ${dispute.status}`);
   console.log(`  Reason:         ${dispute.reason}`);
 
-  // Build the compliant evidence payload based on dispute reason
+  // Fetch real dispute facts, order, and draft from database to ensure no fabrication (Rule 2)
+  const disputeRow = (await db.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)))[0];
+  const disputeFacts = await db.select().from(facts).where(eq(facts.disputeId, disputeId));
+
+  let carrier: string | undefined;
+  let trackingNumber: string | undefined;
+  let notesText: string | undefined;
+
+  if (disputeRow?.orderId) {
+    const orderRow = (await db.select().from(orders).where(eq(orders.id, disputeRow.orderId)))[0];
+    if (orderRow?.carrier && orderRow?.trackingNumber) {
+      carrier = orderRow.carrier;
+      trackingNumber = orderRow.trackingNumber;
+    }
+  }
+
+  // Check for approved draft or derive notes only from cited trusted facts
+  const draftRow = (await db.select().from(drafts).where(eq(drafts.disputeId, disputeId)))[0];
+  if (draftRow?.notesText) {
+    notesText = draftRow.notesText;
+  } else {
+    const trustedFacts = disputeFacts.filter((f) => f.untrusted === 0 && f.kind !== "dispute_msg");
+    if (trustedFacts.length > 0) {
+      notesText = trustedFacts.map((f) => f.value).join(" ");
+    }
+  }
+
+  // Build the compliant evidence payload based on real dispute facts
   const evidencePayload = buildEvidencePayload({
     reason: dispute.reason,
-    carrier: "FEDEX",
-    trackingNumber: "TESTTRACK0001",
-    notesText: "Package dispatched via FedEx with verified tracking. Proof of delivery on record.",
+    carrier,
+    trackingNumber,
+    notesText,
   });
 
   console.log("\nPrepared Evidence Payload:");

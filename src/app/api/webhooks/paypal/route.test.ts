@@ -9,9 +9,15 @@ const mockEnv = vi.hoisted(() => ({
 const seenEventIds = vi.hoisted(() => new Set<string>());
 const verifyWebhookSignature = vi.hoisted(() => vi.fn());
 
+const updatedEvents = vi.hoisted(() => new Map<string, any>());
+const syncPayPalDisputeToDb = vi.hoisted(() => vi.fn());
+const getSandboxDispute = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/paypal/webhook", () => ({ verifyWebhookSignature }));
 vi.mock("@/lib/audit", () => ({ logAudit: vi.fn() }));
+vi.mock("@/lib/paypal/disputes", () => ({ getSandboxDispute }));
+vi.mock("@/lib/paypal/sync", () => ({ syncPayPalDisputeToDb }));
 vi.mock("@/lib/db", () => ({
   db: {
     insert: () => ({
@@ -21,6 +27,13 @@ vi.mock("@/lib/db", () => ({
         }
         seenEventIds.add(row.eventId);
       },
+    }),
+    update: () => ({
+      set: (updates: any) => ({
+        where: async () => {
+          updatedEvents.set("last", updates);
+        },
+      }),
     }),
   },
 }));
@@ -91,5 +104,32 @@ describe("POST /api/webhooks/paypal", () => {
     const res = await POST(webhookRequest("WH-EVT-6", {}));
     expect(res.status).toBe(200);
     expect(verifyWebhookSignature).not.toHaveBeenCalled();
+  });
+
+  it("triggers dispute intake and updates processedAt on CUSTOMER.DISPUTE.* event", async () => {
+    verifyWebhookSignature.mockResolvedValue(true);
+    getSandboxDispute.mockResolvedValue({
+      dispute_id: "PP-D-INTAKE-1",
+      reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+      status: "WAITING_FOR_SELLER_RESPONSE",
+      dispute_amount: { currency_code: "USD", value: "48.00" },
+    });
+    syncPayPalDisputeToDb.mockResolvedValue({});
+
+    const req = new NextRequest("http://localhost/api/webhooks/paypal", {
+      method: "POST",
+      headers: signatureHeaders,
+      body: JSON.stringify({
+        id: "WH-EVT-7",
+        event_type: "CUSTOMER.DISPUTE.CREATED",
+        resource: { dispute_id: "PP-D-INTAKE-1" },
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(getSandboxDispute).toHaveBeenCalledWith("PP-D-INTAKE-1");
+    expect(syncPayPalDisputeToDb).toHaveBeenCalled();
+    expect(updatedEvents.get("last")).toHaveProperty("processedAt");
   });
 });

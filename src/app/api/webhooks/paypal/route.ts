@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { webhookEvents, auditLog } from "@/lib/db/schema";
+import { webhookEvents } from "@/lib/db/schema";
 import { verifyWebhookSignature } from "@/lib/paypal/webhook";
 import { logAudit } from "@/lib/audit";
 import { env } from "@/lib/env";
+import { getSandboxDispute } from "@/lib/paypal/disputes";
+import { syncPayPalDisputeToDb } from "@/lib/paypal/sync";
+import { PayPalDispute } from "@/lib/paypal/types";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 const WebhookEventSchema = z.object({
@@ -65,14 +69,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Deduplicate on event_id via webhook_events
+    // Deduplicate on event_id via webhook_events (initially processedAt: null)
     try {
       await db.insert(webhookEvents).values({
         eventId,
         eventType,
         payloadJson: rawBody,
         receivedAt: new Date().toISOString(),
-        processedAt: new Date().toISOString(),
+        processedAt: null,
       });
     } catch (dbErr: unknown) {
       // If error is unique constraint violation, duplicate event received -> return 200 fast
@@ -82,6 +86,37 @@ export async function POST(req: NextRequest) {
       }
       throw dbErr;
     }
+
+    // Process intake for dispute events
+    if (eventType.startsWith("CUSTOMER.DISPUTE.")) {
+      const resource = (bodyJson.resource || {}) as Record<string, unknown>;
+      const disputeId = (resource.dispute_id || resource.id) as string | undefined;
+
+      if (disputeId) {
+        let disputeDetails: PayPalDispute;
+        try {
+          disputeDetails = await getSandboxDispute(disputeId);
+        } catch (fetchErr) {
+          if (
+            resource.dispute_id &&
+            resource.dispute_amount &&
+            resource.reason &&
+            resource.status
+          ) {
+            disputeDetails = resource as unknown as PayPalDispute;
+          } else {
+            throw fetchErr;
+          }
+        }
+        await syncPayPalDisputeToDb(disputeDetails);
+      }
+    }
+
+    // Mark event as processed after intake completes successfully
+    await db
+      .update(webhookEvents)
+      .set({ processedAt: new Date().toISOString() })
+      .where(eq(webhookEvents.eventId, eventId));
 
     // Log to audit trail
     await logAudit({

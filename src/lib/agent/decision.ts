@@ -1,3 +1,5 @@
+import { formatMoney, fromMinorUnits } from "../money";
+
 export type Recommendation = "FIGHT" | "REFUND" | "ACCEPT";
 
 export interface DecisionInputs {
@@ -6,6 +8,7 @@ export interface DecisionInputs {
   effortCostMinor: number;
   pWin: number; // 0.0 to 1.0
   hasValidEvidence: boolean;
+  currency?: string;
 }
 
 export interface DecisionResult {
@@ -33,6 +36,7 @@ export function evaluateDecision({
   effortCostMinor,
   pWin,
   hasValidEvidence,
+  currency = "USD",
 }: DecisionInputs): DecisionResult {
   const lossIfRefundMinor = amountMinor;
 
@@ -45,7 +49,13 @@ export function evaluateDecision({
 
   const netBenefitOfFightingMinor = lossIfRefundMinor - expectedLossIfFightMinor;
 
-  const calculationText = `(1 - ${(pWin).toFixed(2)}) * (${(amountMinor / 100).toFixed(2)} + ${(feeMinor / 100).toFixed(2)}) + ${(effortCostMinor / 100).toFixed(2)} = $${(expectedLossIfFightMinor / 100).toFixed(2)}`;
+  const curr = currency.toUpperCase();
+  const amountStr = fromMinorUnits(amountMinor, curr);
+  const feeStr = fromMinorUnits(feeMinor, curr);
+  const effortStr = fromMinorUnits(effortCostMinor, curr);
+  const expectedLossFormatted = formatMoney(expectedLossIfFightMinor, curr);
+
+  const calculationText = `(1 - ${pWin.toFixed(2)}) * (${amountStr} + ${feeStr}) + ${effortStr} = ${expectedLossFormatted}`;
 
   let recommendation: Recommendation;
   let rationale: string;
@@ -56,10 +66,10 @@ export function evaluateDecision({
       "No valid fulfillment or delivery evidence on record. Defending without evidence results in automatic loss; accepting the claim prevents further dispute escalation.";
   } else if (expectedLossIfFightMinor < lossIfRefundMinor) {
     recommendation = "FIGHT";
-    rationale = `Favorable expected outcome: Fighting is projected to save $${(netBenefitOfFightingMinor / 100).toFixed(2)} compared to an immediate refund, supported by strong verified evidence.`;
+    rationale = `Favorable expected outcome: Fighting is projected to save ${formatMoney(netBenefitOfFightingMinor, curr)} compared to an immediate refund, supported by strong verified evidence.`;
   } else {
     recommendation = "REFUND";
-    rationale = `Unfavorable expected value: The estimated loss of fighting ($${(expectedLossIfFightMinor / 100).toFixed(2)} factoring fees and merchant effort) exceeds the direct refund amount of $${(lossIfRefundMinor / 100).toFixed(2)}. Immediate refund is cost-optimal.`;
+    rationale = `Unfavorable expected value: The estimated loss of fighting (${expectedLossFormatted} factoring fees and merchant effort) exceeds the direct refund amount of ${formatMoney(lossIfRefundMinor, curr)}. Immediate refund is cost-optimal.`;
   }
 
   return {

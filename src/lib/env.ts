@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { toMinorUnits } from "./money";
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -13,22 +14,22 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default("file:./data/app.db"),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
   APP_PASSWORD: z.string().optional().default(""),
-  CRON_SECRET: z.string().default("dev-cron-secret"),
+  CRON_SECRET: z.string().min(1).default("dev-cron-secret"),
   DEMO_MODE: z
     .string()
     .optional()
     .default("true")
     .transform((val) => val === "true" || val === "1"),
   DISPUTE_FEE: z
-    .string()
+    .union([z.string(), z.number()])
     .optional()
     .default("0.00")
-    .transform((val) => parseFloat(val) || 0),
+    .transform((val) => toMinorUnits(val, "USD")),
   EFFORT_COST: z
-    .string()
+    .union([z.string(), z.number()])
     .optional()
     .default("5.00")
-    .transform((val) => parseFloat(val) || 5.0),
+    .transform((val) => toMinorUnits(val, "USD")),
   AUTOPILOT: z
     .string()
     .optional()

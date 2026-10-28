@@ -26,6 +26,8 @@ export interface BuildEvidenceParams {
 
 /**
  * Maps dispute reason to the compliant PayPal evidence payload structure.
+ * Enforces Rule 2: Never fabricate notes or claims. Notes must only come from cited facts.
+ * If tracking information is absent, do not send empty PROOF_OF_FULFILLMENT.
  */
 export function buildEvidencePayload({
   reason,
@@ -34,6 +36,8 @@ export function buildEvidencePayload({
   notesText,
   refundId,
 }: BuildEvidenceParams): ProvideEvidenceInput {
+  const cleanNotes = notesText && notesText.trim() ? notesText.trim() : undefined;
+
   if (reason === "MERCHANDISE_OR_SERVICE_NOT_RECEIVED") {
     if (refundId) {
       return {
@@ -43,28 +47,36 @@ export function buildEvidencePayload({
             evidence_info: {
               refund_ids: [refundId],
             },
-            notes: notesText || "Full refund was issued directly to customer.",
+            ...(cleanNotes ? { notes: cleanNotes } : {}),
           },
         ],
       };
     }
 
-    const trackingList: TrackingInfoPayload[] = [];
     if (carrier && trackingNumber) {
-      trackingList.push({
-        carrier_name: carrier,
-        tracking_number: trackingNumber,
-      });
+      return {
+        evidences: [
+          {
+            evidence_type: "PROOF_OF_FULFILLMENT",
+            evidence_info: {
+              tracking_info: [
+                {
+                  carrier_name: carrier,
+                  tracking_number: trackingNumber,
+                },
+              ],
+            },
+            ...(cleanNotes ? { notes: cleanNotes } : {}),
+          },
+        ],
+      };
     }
 
     return {
       evidences: [
         {
-          evidence_type: "PROOF_OF_FULFILLMENT",
-          evidence_info: {
-            tracking_info: trackingList,
-          },
-          notes: notesText || "Proof of shipment and delivery attached.",
+          evidence_type: "OTHER",
+          ...(cleanNotes ? { notes: cleanNotes } : {}),
         },
       ],
     };
@@ -75,7 +87,7 @@ export function buildEvidencePayload({
     evidences: [
       {
         evidence_type: "OTHER",
-        notes: notesText || "Product description and return policy excerpts attached.",
+        ...(cleanNotes ? { notes: cleanNotes } : {}),
       },
     ],
   };

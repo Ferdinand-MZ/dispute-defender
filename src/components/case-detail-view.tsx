@@ -15,11 +15,13 @@ import {
 } from "@/components/ui/dialog";
 import {
   ArrowLeft,
+  Bot,
   CheckCircle,
   Clock,
   ExternalLink,
   FileCheck,
   FileText,
+  Loader2,
   Lock,
   Package,
   RotateCcw,
@@ -27,6 +29,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Truck,
   User,
   XCircle,
@@ -121,6 +124,38 @@ export function CaseDetailView({
   );
   const paragraphCount =
     parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
+
+  const [askQuestion, setAskQuestion] = useState("");
+  const [askLoading, setAskLoading] = useState(false);
+  const [askAnswer, setAskAnswer] = useState<string | null>(null);
+  const [askToolsUsed, setAskToolsUsed] = useState<string[]>([]);
+
+  async function handleAskSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (!askQuestion.trim() || askLoading) return;
+
+    setAskLoading(true);
+    setAskAnswer(null);
+    setAskToolsUsed([]);
+
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: askQuestion.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to query case copilot");
+      }
+      setAskAnswer(data.answer);
+      setAskToolsUsed(data.toolsUsed || []);
+    } catch (err) {
+      setAskAnswer(`Error: ${(err as Error).message}`);
+    } finally {
+      setAskLoading(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -528,6 +563,69 @@ export function CaseDetailView({
                   Accept Buyer Claim
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Read-Only AI Inquiry Panel (PayPal Agent Toolkit) */}
+          <Card className="border-primary/20 bg-primary/[0.02]">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-xs uppercase text-primary font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Bot className="h-4 w-4 text-primary" />
+                  Ask Copilot
+                </span>
+                <Badge variant="outline" className="text-[10px] text-primary bg-primary/5">
+                  PayPal Agent Toolkit
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Investigate this dispute using read-only PayPal tools (<code className="text-[10px]">get_dispute</code>, <code className="text-[10px]">get_shipment_tracking</code>).
+              </p>
+
+              <form onSubmit={handleAskSubmit} className="space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={askQuestion}
+                    onChange={(e) => setAskQuestion(e.target.value)}
+                    placeholder="e.g. What is the delivery tracking proof?"
+                    className="flex-1 px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="h-8 text-xs font-semibold gap-1 shrink-0"
+                    disabled={askLoading || !askQuestion.trim()}
+                  >
+                    {askLoading ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    <span>Ask</span>
+                  </Button>
+                </div>
+              </form>
+
+              {askAnswer && (
+                <div className="p-3 bg-card border rounded-md text-xs space-y-2 mt-2">
+                  <div className="flex items-center justify-between border-b pb-1.5 text-muted-foreground text-[10px]">
+                    <span className="font-semibold text-foreground flex items-center gap-1">
+                      <Sparkles className="h-3 w-3 text-primary" /> Response
+                    </span>
+                    {askToolsUsed.length > 0 && (
+                      <span className="flex items-center gap-1">
+                        Tools: {askToolsUsed.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="whitespace-pre-wrap leading-relaxed text-foreground">
+                    {askAnswer}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
