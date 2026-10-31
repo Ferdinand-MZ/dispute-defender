@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { disputes, actions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { canTransition, transitionState, CaseState } from "@/lib/agent/state";
 import { acceptSandboxDisputeClaim } from "@/lib/paypal/disputes";
 import { logAudit } from "@/lib/audit";
-import { env } from "@/lib/env";
+import { verifyMerchantAuth } from "@/lib/auth";
+import {
+  isDemoMode,
+  isSandboxMode,
+  assertSandboxCredentials,
+  formatDemoSimulationResponse,
+  PayPalConfigError,
+} from "@/lib/mode";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
 const AcceptRequestSchema = z.object({
-  approvedBy: z.string().min(1, "Merchant representative name ('approvedBy') is required"),
+  approvedBy: z
+    .string()
+    .min(1, "Merchant representative name ('approvedBy') is required")
+    .optional(),
   note: z.string().optional(),
 });
 
@@ -22,6 +32,15 @@ export async function POST(
   const disputeId = params.id;
 
   try {
+    // 1. Strict Server-Side Authentication & Authorization Gate
+    const auth = verifyMerchantAuth(req);
+    if (!auth.authenticated || !auth.user) {
+      return NextResponse.json(
+        { error: auth.error || "Authentication required" },
+        { status: auth.status || 401 }
+      );
+    }
+
     const rawBody = await req.json().catch(() => ({}));
     const parseResult = AcceptRequestSchema.safeParse(rawBody);
 
@@ -32,9 +51,10 @@ export async function POST(
       );
     }
 
-    const { approvedBy, note } = parseResult.data;
+    const approvedBy = parseResult.data?.approvedBy?.trim() || auth.user.name;
+    const { note } = parseResult.data;
 
-    // 1. Fetch Dispute Record
+    // 2. Fetch Dispute Record
     const disputeRows = await db
       .select()
       .from(disputes)
@@ -46,7 +66,33 @@ export async function POST(
 
     const dispute = disputeRows[0];
 
-    // 2. Validate State Transition
+    // 3. Duplicate Accept Guard
+    if (dispute.caseState === "ACCEPTED") {
+      return NextResponse.json(
+        { error: "Duplicate claim acceptance: Claim has already been accepted." },
+        { status: 409 }
+      );
+    }
+
+    const existingAccepts = await db
+      .select()
+      .from(actions)
+      .where(
+        and(
+          eq(actions.disputeId, disputeId),
+          eq(actions.type, "accept_claim"),
+          eq(actions.status, "ACCEPTED")
+        )
+      );
+
+    if (existingAccepts.length > 0) {
+      return NextResponse.json(
+        { error: "Duplicate claim acceptance: Claim has already been accepted." },
+        { status: 409 }
+      );
+    }
+
+    // 4. Validate State Transition
     if (!canTransition(dispute.caseState as CaseState, "ACCEPTED")) {
       return NextResponse.json(
         { error: `Cannot transition case from '${dispute.caseState}' to 'ACCEPTED'` },
@@ -54,19 +100,40 @@ export async function POST(
       );
     }
 
-    // 3. PayPal Disputes API Call
-    let paypalResponse: Record<string, unknown> = { status: "ACCEPTED" };
-    if (env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET) {
+    // 5. Server-Controlled Mode Execution Gate
+    let paypalResponse: Record<string, unknown>;
+
+    if (isDemoMode()) {
+      // DEMO MODE: Pure local simulation with visible labeling, NEVER contacts PayPal API
+      paypalResponse = formatDemoSimulationResponse("accept_claim", {
+        disputeId,
+        note: note || "Accepting claim in accordance with store policy.",
+      });
+    } else {
+      // SANDBOX MODE: Communicate with PayPal Disputes API
+      try {
+        assertSandboxCredentials();
+      } catch (configErr) {
+        if (configErr instanceof PayPalConfigError) {
+          return NextResponse.json(
+            { error: configErr.message, mode: "sandbox" },
+            { status: configErr.statusCode }
+          );
+        }
+        throw configErr;
+      }
+
       await acceptSandboxDisputeClaim(
         dispute.paypalDisputeId,
         approvedBy,
         note || "Accepting claim in accordance with store policy."
       );
-      paypalResponse = { status: "TRANSMITTED_TO_PAYPAL_SANDBOX", endpoint: `/v1/customer/disputes/${disputeId}/accept-claim` };
-    } else {
+
       paypalResponse = {
-        status: "SIMULATED_SANDBOX_SUCCESS",
-        note: "Simulated PayPal API accept-claim call",
+        mode: "sandbox",
+        simulated: false,
+        status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
+        endpoint: `/v1/customer/disputes/${disputeId}/accept-claim`,
       };
     }
 
@@ -74,7 +141,7 @@ export async function POST(
     const now = new Date().toISOString();
     const actionId = `act_${Date.now()}_acc`;
 
-    // 4. Update Database
+    // 6. Update Database
     db.transaction((tx) => {
       tx.update(disputes)
         .set({
@@ -99,12 +166,18 @@ export async function POST(
         .run();
     });
 
-    // 5. Append Audit Record
+    // 7. Append Audit Record
     await logAudit({
       actor: "human",
       disputeId,
       action: "CLAIM_ACCEPTED",
-      detail: { approvedBy, note, caseState: nextState },
+      detail: {
+        approvedBy,
+        note,
+        caseState: nextState,
+        mode: isDemoMode() ? "demo" : "sandbox",
+        simulated: isDemoMode(),
+      },
     });
 
     return NextResponse.json({
@@ -112,6 +185,9 @@ export async function POST(
       caseState: nextState,
       actionId,
       approvedBy,
+      mode: isDemoMode() ? "demo" : "sandbox",
+      simulated: isDemoMode(),
+      paypalResponse,
     });
   } catch (err) {
     return NextResponse.json(

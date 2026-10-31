@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { computeDraftApprovalHash } from "@/lib/agent/approval";
 
 // In-memory mock store
 const mockDisputeStore = vi.hoisted(() => new Map<string, any>());
@@ -17,6 +18,10 @@ vi.mock("@/lib/env", () => ({
   env: {
     PAYPAL_CLIENT_ID: "mock_client_id",
     PAYPAL_CLIENT_SECRET: "mock_client_secret",
+    PAYPAL_ENV: "sandbox",
+    DEMO_MODE: false,
+    APP_PASSWORD: "test-merchant-secret",
+    NODE_ENV: "test",
   },
 }));
 
@@ -36,35 +41,52 @@ vi.mock("@/lib/audit", () => ({
   }),
 }));
 
+function getTableNameFromTable(table: any): string {
+  return table?.[Symbol.for("drizzle:Name")] || table?.name || "";
+}
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: () => ({
       from: (table: any) => ({
-        where: (condition: any) => ({
-          orderBy: () => {
-            const disputeId = "PP-D-1001";
-            const draft = mockDraftStore.get(disputeId);
-            return draft ? [draft] : [];
-          },
-          all: () => {
-            return [];
-          },
-          then: (resolve: any) => {
-            // Check which store is queried
+        where: (_condition: any) => {
+          const resolveData = () => {
+            const tblName = getTableNameFromTable(table);
             const dispute = mockDisputeStore.get("PP-D-1001");
             const order = mockOrderStore.get("O-1001");
             const draft = mockDraftStore.get("PP-D-1001");
 
-            // For draft queries
-            if (table.name === "drafts") {
-              return resolve(draft ? [draft] : []);
+            if (tblName === "drafts") {
+              return draft ? [draft] : [];
             }
-            if (table.name === "orders") {
-              return resolve(order ? [order] : []);
+            if (tblName === "orders") {
+              return order ? [order] : [];
             }
-            return resolve(dispute ? [dispute] : []);
-          },
-        }),
+            if (tblName === "actions") {
+              const condStr = JSON.stringify(_condition, (k, v) => (k === "table" ? "" : v)) || "";
+              if (condStr.includes('"provide_evidence"')) {
+                return mockActionsList.filter((a) => a.type === "provide_evidence");
+              }
+              if (condStr.includes('"approve"')) {
+                return mockActionsList.filter((a) => a.type === "approve");
+              }
+              if (condStr.includes('"refund"')) {
+                return mockActionsList.filter((a) => a.type === "refund");
+              }
+              if (condStr.includes('"accept_claim"')) {
+                return mockActionsList.filter((a) => a.type === "accept_claim");
+              }
+              return [...mockActionsList];
+            }
+            return dispute ? [dispute] : [];
+          };
+
+          return {
+            orderBy: () => resolveData(),
+            all: () => resolveData(),
+            then: (resolve: any) => resolve(resolveData()),
+          };
+        },
       }),
     }),
     transaction: (cb: any) => {
@@ -112,6 +134,11 @@ import { POST as refundHandler } from "./refund/route";
 import { POST as adjudicateHandler } from "@/app/api/admin/simulate/adjudicate/route";
 import { POST as disputeSimulateHandler } from "@/app/api/admin/simulate/dispute/route";
 
+const AUTH_HEADERS = {
+  "content-type": "application/json",
+  "x-merchant-auth": "test-merchant-secret",
+};
+
 describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -120,6 +147,23 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
     mockOrderStore.clear();
     mockActionsList.length = 0;
     mockAuditLogList.length = 0;
+
+    // Default mock implementations
+    mockProvideEvidence.mockResolvedValue({
+      success: true,
+      disputeId: "PP-D-1001",
+      action: "provide-evidence",
+    });
+    mockAcceptClaim.mockResolvedValue({
+      success: true,
+      disputeId: "PP-D-1001",
+      action: "accept-claim",
+    });
+    mockAdjudicate.mockResolvedValue({
+      success: true,
+      disputeId: "PP-D-1001",
+      outcome: "SELLER_FAVOR",
+    });
 
     // Seed test dispute
     mockDisputeStore.set("PP-D-1001", {
@@ -147,6 +191,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
       disputeId: "PP-D-1001",
       version: 1,
       evidenceType: "PROOF_OF_FULFILLMENT",
+      bodyJson: JSON.stringify({ sections: [] }),
       notesText: "Dispatched via FEDEX tracking TESTTRACK0001.",
       groundingStatus: "pass",
       status: "draft",
@@ -157,6 +202,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
     it("fails when approvedBy is empty", async () => {
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/approve", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "" }),
       });
       const res = await approveHandler(req, { params: { id: "PP-D-1001" } });
@@ -174,6 +220,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
 
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/approve", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
       });
       const res = await approveHandler(req, { params: { id: "PP-D-1001" } });
@@ -185,6 +232,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
     it("successfully approves a valid draft and transitions to APPROVED", async () => {
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/approve", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
       });
       const res = await approveHandler(req, { params: { id: "PP-D-1001" } });
@@ -205,6 +253,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
 
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/submit", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
       });
       const res = await submitHandler(req, { params: { id: "PP-D-1001" } });
@@ -219,8 +268,36 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
         caseState: "APPROVED",
       });
 
+      const draft = mockDraftStore.get("PP-D-1001");
+      const order = mockOrderStore.get("O-1001");
+      const approvalHash = computeDraftApprovalHash({
+        draftId: draft.id,
+        disputeId: draft.disputeId,
+        evidenceType: draft.evidenceType,
+        bodyJson: draft.bodyJson,
+        notesText: draft.notesText,
+        carrier: order?.carrier,
+        trackingNumber: order?.trackingNumber,
+      });
+
+      mockActionsList.push({
+        id: "ACT-APPR-1001",
+        disputeId: "PP-D-1001",
+        type: "approve",
+        status: "APPROVED",
+        payloadJson: JSON.stringify({
+          draftId: draft.id,
+          disputeId: "PP-D-1001",
+          approvalHash,
+          approvedBy: "Sarah Jenkins",
+        }),
+        approvedBy: "Sarah Jenkins",
+        createdAt: new Date().toISOString(),
+      });
+
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/submit", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
       });
       const res = await submitHandler(req, { params: { id: "PP-D-1001" } });
@@ -241,6 +318,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
     it("accepts buyer claim and transitions to ACCEPTED", async () => {
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/accept", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
       });
       const res = await acceptHandler(req, { params: { id: "PP-D-1001" } });
@@ -265,6 +343,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
 
       const req = new NextRequest("http://localhost:3000/api/cases/PP-D-1001/refund", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
       });
       const res = await refundHandler(req, { params: { id: "PP-D-1001" } });
@@ -286,6 +365,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
     it("settles dispute via adjudicate endpoint and transitions to RESOLVED", async () => {
       const req = new NextRequest("http://localhost:3000/api/admin/simulate/adjudicate", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           disputeId: "PP-D-1001",
           outcome: "SELLER_FAVOR",
@@ -305,6 +385,7 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
     it("simulates scenario S1 dispute into queue", async () => {
       const req = new NextRequest("http://localhost:3000/api/admin/simulate/dispute", {
         method: "POST",
+        headers: AUTH_HEADERS,
         body: JSON.stringify({
           scenario: "S1",
         }),

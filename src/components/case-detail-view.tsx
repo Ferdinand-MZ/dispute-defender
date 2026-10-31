@@ -155,7 +155,10 @@ export function CaseDetailView({
       if (caseState !== "APPROVED") {
         const appRes = await fetch(`/api/cases/${dispute.paypalDisputeId}/approve`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-merchant-auth": "demo-merchant-admin",
+          },
           body: JSON.stringify({ approvedBy: approverName.trim() }),
         });
         const appData = await appRes.json();
@@ -167,7 +170,10 @@ export function CaseDetailView({
       // 2. Submit evidence packet to PayPal Disputes API
       const subRes = await fetch(`/api/cases/${dispute.paypalDisputeId}/submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
         body: JSON.stringify({ approvedBy: approverName.trim() }),
       });
       const subData = await subRes.json();
@@ -207,7 +213,10 @@ export function CaseDetailView({
     try {
       const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/refund`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
         body: JSON.stringify({
           approvedBy: approverName.trim(),
           noteToPayer: "Dispute refunded in merchant's favor of customer relation.",
@@ -250,7 +259,10 @@ export function CaseDetailView({
     try {
       const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/accept`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
         body: JSON.stringify({
           approvedBy: approverName.trim(),
           note: "Accepting buyer claim in accordance with store policies.",

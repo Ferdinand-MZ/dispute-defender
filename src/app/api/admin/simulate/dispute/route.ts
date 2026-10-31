@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { disputes, orders, facts, analyses, drafts } from "@/lib/db/schema";
+import { disputes, orders, facts } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { logAudit } from "@/lib/audit";
 import { formatMoney } from "@/lib/money";
+import { verifyAdminAuth } from "@/lib/auth";
+import { isDemoMode } from "@/lib/mode";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,15 @@ const SimulateDisputeSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Strict Server-Side Admin Authentication Gate
+    const auth = verifyAdminAuth(req);
+    if (!auth.authenticated || !auth.user) {
+      return NextResponse.json(
+        { error: auth.error || "Administrative authentication required" },
+        { status: auth.status || 401 }
+      );
+    }
+
     const rawBody = await req.json().catch(() => ({}));
     const parseResult = SimulateDisputeSchema.safeParse(rawBody);
 
@@ -36,7 +47,10 @@ export async function POST(req: NextRequest) {
     let targetDisputeId = "";
 
     if (scenario) {
-      const scenarioMap: Record<string, { id: string; orderId: string; reason: string; amountMinor: number; dueHours: number; state: string }> = {
+      const scenarioMap: Record<
+        string,
+        { id: string; orderId: string; reason: string; amountMinor: number; dueHours: number; state: string }
+      > = {
         S1: {
           id: "PP-D-1001",
           orderId: "O-1001",
@@ -177,13 +191,19 @@ export async function POST(req: NextRequest) {
       actor: "system",
       disputeId: targetDisputeId,
       action: "DISPUTE_SIMULATED",
-      detail: { scenario: scenario || "CUSTOM", disputeId: targetDisputeId },
+      detail: {
+        scenario: scenario || "CUSTOM",
+        disputeId: targetDisputeId,
+        mode: isDemoMode() ? "demo" : "sandbox",
+      },
     });
 
     return NextResponse.json({
       success: true,
       disputeId: targetDisputeId,
       scenario: scenario || null,
+      mode: isDemoMode() ? "demo" : "sandbox",
+      simulated: true,
       message: `Dispute ${targetDisputeId} initialized and ready in sandbox queue.`,
     });
   } catch (err) {

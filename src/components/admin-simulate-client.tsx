@@ -46,7 +46,10 @@ export function AdminSimulateClient() {
 
       const res = await fetch("/api/admin/simulate/dispute", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
         body: JSON.stringify(payload),
       });
 
@@ -83,7 +86,10 @@ export function AdminSimulateClient() {
     try {
       const res = await fetch("/api/admin/simulate/adjudicate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
         body: JSON.stringify({
           disputeId: disputeIdToAdjudicate.trim(),
           outcome,
