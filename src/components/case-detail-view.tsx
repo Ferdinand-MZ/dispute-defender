@@ -74,6 +74,23 @@ export function CaseDetailView({
 }: CaseDetailViewProps) {
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [caseState, setCaseState] = useState<string>(dispute.caseState);
+  const [auditLogList, setAuditLogList] = useState<AuditLogEntry[]>(initialAuditLog);
+  const [approverName, setApproverName] = useState("Sarah Jenkins (Merchant Admin)");
+
+  // Submission state
+  const [submittingEvidence, setSubmittingEvidence] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Refund state
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refunding, setRefunding] = useState(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
+
+  // Accept claim state
+  const [showAcceptModal, setShowAcceptModal] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
   // Parse draft body JSON if present
   let parsedDraftBody: {
@@ -124,6 +141,146 @@ export function CaseDetailView({
   );
   const paragraphCount =
     parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
+
+  async function handleApproveAndSubmit() {
+    if (!approverName.trim()) {
+      setSubmitError("Please provide an authorized representative name.");
+      return;
+    }
+    setSubmittingEvidence(true);
+    setSubmitError(null);
+
+    try {
+      // 1. If not yet approved, approve the draft
+      if (caseState !== "APPROVED") {
+        const appRes = await fetch(`/api/cases/${dispute.paypalDisputeId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approvedBy: approverName.trim() }),
+        });
+        const appData = await appRes.json();
+        if (!appRes.ok) {
+          throw new Error(appData.error || "Approval failed");
+        }
+      }
+
+      // 2. Submit evidence packet to PayPal Disputes API
+      const subRes = await fetch(`/api/cases/${dispute.paypalDisputeId}/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approvedBy: approverName.trim() }),
+      });
+      const subData = await subRes.json();
+      if (!subRes.ok) {
+        throw new Error(subData.error || "Submission failed");
+      }
+
+      setCaseState("SUBMITTED");
+      setShowApprovalModal(false);
+
+      setAuditLogList((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          ts: new Date().toISOString(),
+          actor: "human",
+          disputeId: dispute.paypalDisputeId,
+          action: "EVIDENCE_SUBMITTED_TO_PAYPAL",
+          detailJson: JSON.stringify({ approvedBy: approverName.trim() }),
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      setSubmitError((err as Error).message);
+    } finally {
+      setSubmittingEvidence(false);
+    }
+  }
+
+  async function handleRefund() {
+    if (!approverName.trim()) {
+      setRefundError("Please provide an authorized representative name.");
+      return;
+    }
+    setRefunding(true);
+    setRefundError(null);
+
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approvedBy: approverName.trim(),
+          noteToPayer: "Dispute refunded in merchant's favor of customer relation.",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Refund failed");
+      }
+
+      setCaseState("REFUNDED");
+      setShowRefundModal(false);
+
+      setAuditLogList((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          ts: new Date().toISOString(),
+          actor: "human",
+          disputeId: dispute.paypalDisputeId,
+          action: "CAPTURE_REFUNDED",
+          detailJson: JSON.stringify({ approvedBy: approverName.trim() }),
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      setRefundError((err as Error).message);
+    } finally {
+      setRefunding(false);
+    }
+  }
+
+  async function handleAcceptClaim() {
+    if (!approverName.trim()) {
+      setAcceptError("Please provide an authorized representative name.");
+      return;
+    }
+    setAccepting(true);
+    setAcceptError(null);
+
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          approvedBy: approverName.trim(),
+          note: "Accepting buyer claim in accordance with store policies.",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Claim acceptance failed");
+      }
+
+      setCaseState("ACCEPTED");
+      setShowAcceptModal(false);
+
+      setAuditLogList((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          ts: new Date().toISOString(),
+          actor: "human",
+          disputeId: dispute.paypalDisputeId,
+          action: "CLAIM_ACCEPTED",
+          detailJson: JSON.stringify({ approvedBy: approverName.trim() }),
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      setAcceptError((err as Error).message);
+    } finally {
+      setAccepting(false);
+    }
+  }
 
   const [askQuestion, setAskQuestion] = useState("");
   const [askLoading, setAskLoading] = useState(false);
@@ -177,13 +334,15 @@ export function CaseDetailView({
           </Badge>
           <Badge
             variant={
-              dispute.caseState === "APPROVED" || dispute.caseState === "RESOLVED"
+              caseState === "APPROVED" || caseState === "RESOLVED" || caseState === "SUBMITTED"
                 ? "success"
+                : caseState === "REFUNDED"
+                ? "warning"
                 : "secondary"
             }
             className="font-mono text-xs uppercase"
           >
-            {dispute.caseState}
+            {caseState}
           </Badge>
         </div>
 
@@ -294,7 +453,7 @@ export function CaseDetailView({
             </CardHeader>
             <CardContent className="space-y-3 text-xs">
               <div className="relative border-l border-border pl-4 space-y-4">
-                {initialAuditLog.map((log) => (
+                {auditLogList.map((log) => (
                   <div key={log.id} className="relative">
                     <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-primary" />
                     <p className="font-semibold text-foreground">{log.action}</p>
@@ -525,11 +684,27 @@ export function CaseDetailView({
 
               <Button
                 onClick={() => setShowApprovalModal(true)}
-                disabled={!draft || !groundingPassed}
+                disabled={
+                  !draft ||
+                  !groundingPassed ||
+                  caseState === "SUBMITTED" ||
+                  caseState === "RESOLVED" ||
+                  caseState === "REFUNDED" ||
+                  caseState === "ACCEPTED"
+                }
                 className="w-full gap-2 text-xs font-semibold"
               >
-                <Send className="h-3.5 w-3.5" />
-                Review & Approve Submission
+                {caseState === "SUBMITTED" ? (
+                  <>
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+                    Evidence Submitted to PayPal
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    Review & Approve Submission
+                  </>
+                )}
               </Button>
               {!draft && (
                 <p className="text-[11px] text-muted-foreground">Approval unlocks once an evidence draft exists.</p>
@@ -541,26 +716,35 @@ export function CaseDetailView({
               )}
 
               <div className="pt-2 border-t space-y-2">
-                <p className="text-[11px] text-muted-foreground">
-                  Refund and accept are not connected to PayPal yet.
-                </p>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full justify-start text-xs text-muted-foreground gap-2"
-                  disabled
+                  onClick={() => setShowRefundModal(true)}
+                  disabled={
+                    caseState === "REFUNDED" ||
+                    caseState === "ACCEPTED" ||
+                    caseState === "RESOLVED"
+                  }
+                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground gap-2"
                 >
                   <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
-                  Refund Dispute ({formatMoney(dispute.amountMinor, dispute.currency)})
+                  {caseState === "REFUNDED"
+                    ? "Capture Refunded"
+                    : `Refund Dispute (${formatMoney(dispute.amountMinor, dispute.currency)})`}
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full justify-start text-xs text-muted-foreground gap-2"
-                  disabled
+                  onClick={() => setShowAcceptModal(true)}
+                  disabled={
+                    caseState === "ACCEPTED" ||
+                    caseState === "REFUNDED" ||
+                    caseState === "RESOLVED"
+                  }
+                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground gap-2"
                 >
                   <XCircle className="h-3.5 w-3.5 text-destructive" />
-                  Accept Buyer Claim
+                  {caseState === "ACCEPTED" ? "Claim Accepted" : "Accept Buyer Claim"}
                 </Button>
               </div>
             </CardContent>
@@ -678,16 +862,167 @@ export function CaseDetailView({
           </div>
         </dl>
 
-        <p className="text-xs text-muted-foreground">
-          Sending to PayPal is not connected yet, so nothing will be submitted from this screen.
-        </p>
+        <div className="space-y-1.5 pt-1">
+          <label className="text-xs font-semibold text-foreground">
+            Authorized Merchant Signer:
+          </label>
+          <input
+            type="text"
+            value={approverName}
+            onChange={(e) => setApproverName(e.target.value)}
+            placeholder="e.g. Sarah Jenkins (Merchant Admin)"
+            className="w-full px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+
+        {submitError && (
+          <p className="text-xs text-destructive bg-destructive/10 p-2 rounded-md border border-destructive/20">
+            {submitError}
+          </p>
+        )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setShowApprovalModal(false)}>
+          <Button
+            variant="outline"
+            onClick={() => setShowApprovalModal(false)}
+            disabled={submittingEvidence}
+          >
             Cancel
           </Button>
-          <Button disabled className="gap-2">
+          <Button
+            onClick={handleApproveAndSubmit}
+            disabled={submittingEvidence || !approverName.trim()}
+            className="gap-2"
+          >
+            {submittingEvidence && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Confirm & Submit to PayPal
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Refund Modal */}
+      <Dialog open={showRefundModal} onOpenChange={setShowRefundModal}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RotateCcw className="h-5 w-5 text-amber-600" />
+            Confirm Capture Refund
+          </DialogTitle>
+          <DialogDescription>
+            You are authorizing an immediate refund of {formatMoney(dispute.amountMinor, dispute.currency)} via PayPal Payments API (Sandbox).
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 text-xs">
+          <div className="border rounded-lg p-3 bg-muted/20 space-y-1.5">
+            <p>
+              <strong>Dispute ID:</strong> <span className="font-mono">{dispute.paypalDisputeId}</span>
+            </p>
+            <p>
+              <strong>Refund Amount:</strong> {formatMoney(dispute.amountMinor, dispute.currency)}
+            </p>
+            <p className="text-muted-foreground text-[11px]">
+              This will execute a refund on capture {dispute.captureId || order?.captureId || "on file"} and transition the case state to REFUNDED.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">
+              Authorized Merchant Signer:
+            </label>
+            <input
+              type="text"
+              value={approverName}
+              onChange={(e) => setApproverName(e.target.value)}
+              placeholder="e.g. Sarah Jenkins (Merchant Admin)"
+              className="w-full px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          {refundError && (
+            <p className="text-xs text-destructive bg-destructive/10 p-2 rounded-md border border-destructive/20">
+              {refundError}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setShowRefundModal(false)}
+            disabled={refunding}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleRefund}
+            disabled={refunding || !approverName.trim()}
+            variant="destructive"
+            className="gap-2"
+          >
+            {refunding && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Confirm & Issue Refund
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Accept Buyer Claim Modal */}
+      <Dialog open={showAcceptModal} onOpenChange={setShowAcceptModal}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <XCircle className="h-5 w-5 text-destructive" />
+            Confirm Accept Buyer Claim
+          </DialogTitle>
+          <DialogDescription>
+            You are formally conceding this dispute claim to the customer via PayPal Disputes API (Sandbox).
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 text-xs">
+          <div className="border rounded-lg p-3 bg-muted/20 space-y-1.5">
+            <p>
+              <strong>Dispute ID:</strong> <span className="font-mono">{dispute.paypalDisputeId}</span>
+            </p>
+            <p className="text-muted-foreground text-[11px]">
+              PayPal will close this dispute in the buyer&apos;s favor and debit the disputed capital.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-foreground">
+              Authorized Merchant Signer:
+            </label>
+            <input
+              type="text"
+              value={approverName}
+              onChange={(e) => setApproverName(e.target.value)}
+              placeholder="e.g. Sarah Jenkins (Merchant Admin)"
+              className="w-full px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          {acceptError && (
+            <p className="text-xs text-destructive bg-destructive/10 p-2 rounded-md border border-destructive/20">
+              {acceptError}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setShowAcceptModal(false)}
+            disabled={accepting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAcceptClaim}
+            disabled={accepting || !approverName.trim()}
+            variant="destructive"
+            className="gap-2"
+          >
+            {accepting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Confirm & Accept Claim
           </Button>
         </DialogFooter>
       </Dialog>
