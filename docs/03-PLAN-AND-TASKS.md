@@ -140,3 +140,28 @@ Daftar lengkap ada di `02-ARCHITECTURE.md` bagian 12. Tiga yang paling mungkin m
 1. **T04 macet** (auth assertion atau format multipart). Alokasikan buffer, tanya komunitas, gunakan fallback manual. Jangan menunda G1.
 2. **Validator grounding terlalu ketat atau terlalu longgar** (T15). Mulai dengan aturan paling sederhana, lalu tambah tes adversarial satu per satu.
 3. **Kehabisan waktu untuk video.** Tulis naskah video sebelum T17 selesai, dan bangun hanya yang tampil di naskah.
+
+## 7. Status Pelaksanaan Terverifikasi
+
+### Tugas yang Selesai dan Terverifikasi
+- **T18 (Alur Persetujuan Manusia):** Endpoint `POST /api/cases/[id]/approve` dan modal persetujuan interaktif di UI. Memvalidasi bahwa draft harus lolos grounding sebelum disetujui, mencatat `approvedBy`, dan mengupdate state ke `APPROVED`.
+- **T11 (Pengiriman Bukti Berbasis Aturan & Human Gate):** Endpoint `POST /api/cases/[id]/submit`. Memvalidasi status `APPROVED`, membangun payload bukti dari order & draft, memanggil `provideDisputeEvidence` (dengan fallback simulasi sandbox saat credentials lokal kosong), dan mengupdate state ke `SUBMITTED`.
+- **T19 (Aksi Terima Klaim & Refund):**
+  - Fungsi `refundCapture` di `src/lib/paypal/orders.ts` menggunakan API PayPal Payments v2 (`POST /v2/payments/captures/{id}/refund`) dengan konversi integer minor units dan header `PayPal-Request-Id`.
+  - Endpoint `POST /api/cases/[id]/refund` dan modal konfirmasi refund merchant di UI.
+  - Endpoint `POST /api/cases/[id]/accept` dan modal konfirmasi terima klaim di UI.
+- **T09 (Admin Simulator Endpoints & UI Interaktif):**
+  - Endpoint `POST /api/admin/simulate/adjudicate` untuk memutus sengketa (`SELLER_FAVOR` / `BUYER_FAVOR`).
+  - Endpoint `POST /api/admin/simulate/dispute` untuk memuat skenario preset (S1–S4) atau sengketa kustom.
+  - Komponen `AdminSimulateClient` di `/admin/simulate` dengan kontrol interaktif dan feedback visual.
+
+### Hasil Quality Gate
+- `pnpm install --frozen-lockfile`: Bersih, lockfile konsisten.
+- `pnpm run typecheck`: 0 error (TypeScript strict).
+- `pnpm run lint`: 0 error / warning (ESLint).
+- `pnpm run test`: 15 file tes lulus, 69 tes lulus tanpa regresi.
+- `pnpm run build`: Build Next.js 14 App Router sukses, seluruh 13 route server/static teroptimasi.
+
+### Blocker & Risiko yang Tersisa
+- Kredensial live PayPal Sandbox (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`) belum disetel di shell lokal; integrasi diuji dengan mock/fixture dan defensive handling yang siap untuk eksekusi langsung begitu variabel lingkungan disediakan.
+- Sisa tugas AI drafting otomatis (`draft.ts` dan `analyze.ts`) untuk melengkapi regenerasi draft dinamis via LLM di luar draft template.

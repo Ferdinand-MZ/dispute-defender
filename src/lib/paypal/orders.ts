@@ -3,6 +3,8 @@ import {
   PayPalOrder,
   PayPalOrderSchema,
   PayPalItem,
+  PayPalRefund,
+  PayPalRefundSchema,
 } from "./types";
 import { fromMinorUnits } from "../money";
 
@@ -115,4 +117,52 @@ export async function captureSandboxOrder(
   );
 
   return PayPalOrderSchema.parse(data);
+}
+
+export interface RefundCaptureInput {
+  captureId: string;
+  approvedBy: string; // Required by Non-negotiable rule 3
+  amountMinor?: number;
+  currency?: string;
+  noteToPayer?: string;
+  requestId?: string;
+}
+
+/**
+ * Refund a captured payment in the PayPal Sandbox environment.
+ * NON-NEGOTIABLE RULE 3: Requires explicit human authorization (`approvedBy`).
+ */
+export async function refundCapture(input: RefundCaptureInput): Promise<PayPalRefund> {
+  if (!input.captureId) {
+    throw new Error("captureId is required to refund a capture");
+  }
+
+  if (!input.approvedBy || !input.approvedBy.trim()) {
+    throw new Error("SECURITY_VIOLATION: Refunding a payment requires explicit human approval ('approvedBy').");
+  }
+
+  const currency = input.currency || "USD";
+  const bodyPayload: Record<string, unknown> = {};
+
+  if (input.amountMinor !== undefined) {
+    bodyPayload.amount = {
+      value: fromMinorUnits(input.amountMinor, currency),
+      currency_code: currency,
+    };
+  }
+
+  if (input.noteToPayer) {
+    bodyPayload.note_to_payer = input.noteToPayer;
+  }
+
+  const { data } = await payPalRequest<unknown>(
+    `/v2/payments/captures/${encodeURIComponent(input.captureId)}/refund`,
+    {
+      method: "POST",
+      requestId: input.requestId || `ref_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      body: JSON.stringify(bodyPayload),
+    }
+  );
+
+  return PayPalRefundSchema.parse(data);
 }

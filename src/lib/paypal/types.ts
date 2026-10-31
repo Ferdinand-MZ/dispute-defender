@@ -51,6 +51,16 @@ export const PayPalCaptureSchema = z.object({
 });
 export type PayPalCapture = z.infer<typeof PayPalCaptureSchema>;
 
+export const PayPalRefundSchema = z.object({
+  id: z.string(),
+  status: z.enum(["COMPLETED", "PENDING", "CANCELLED", "FAILED"]).optional(),
+  amount: PayPalMoneySchema.optional(),
+  note_to_payer: z.string().optional(),
+  create_time: z.string().optional(),
+  update_time: z.string().optional(),
+});
+export type PayPalRefund = z.infer<typeof PayPalRefundSchema>;
+
 export const PayPalPurchaseUnitSchema = z.object({
   reference_id: z.string().optional(),
   amount: z.object({
