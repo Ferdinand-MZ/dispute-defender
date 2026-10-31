@@ -13,6 +13,7 @@ export interface SectionClaim {
 export interface DraftPayload {
   summary: string;
   sections: SectionClaim[];
+  notesText?: string;
 }
 
 export interface GroundingError {
@@ -43,8 +44,8 @@ const BANNED_PHRASES = [
   /\babsolutely\b/i,
 ];
 
-// Tracking number regex pattern (case-insensitive, 9-34 chars)
-const TRACKING_REGEX = /\b[A-Za-z0-9]{9,34}\b/g;
+// Tracking number regex pattern: requires 9-34 chars, must contain digits or be all-uppercase identifier code
+const TRACKING_REGEX = /\b(?=[A-Za-z0-9]{9,34}\b)(?:[A-Za-z]*\d+[A-Za-z0-9]*|[A-Z]{9,34})\b/g;
 
 // Currency amount regex pattern (supports $, USD, EUR, GBP, JPY, and comma separators like $1,200.00)
 const AMOUNT_REGEX = /(?:[\$£€¥]|(?:USD|EUR|GBP|JPY)\s*)((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)|((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(?:USD|EUR|GBP|JPY)/gi;
@@ -109,10 +110,10 @@ function extractTracking(text: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = TRACKING_REGEX.exec(text)) !== null) {
     const val = match[0];
-    // Ignore purely alphabetical words shorter than 12 letters (standard english words)
-    if (/^[A-Za-z]+$/.test(val) && val.length < 12) continue;
     // Ignore pure dates like 20261020 or 2026
-    if (/^\d{4}$/.test(val)) continue;
+    if (/^\d{4}$/.test(val) || /^\d{8}$/.test(val)) continue;
+    // Ignore purely alphabetical words unless all-uppercase tracking codes
+    if (/^[A-Za-z]+$/.test(val) && val !== val.toUpperCase()) continue;
     tracking.push(val.toLowerCase());
   }
   return tracking;

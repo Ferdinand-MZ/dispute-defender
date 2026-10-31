@@ -14,22 +14,28 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertTriangle,
   ArrowLeft,
   Bot,
   CheckCircle,
   Clock,
+  Edit3,
   ExternalLink,
   FileCheck,
   FileText,
   Loader2,
   Lock,
   Package,
+  Plus,
+  RefreshCw,
   RotateCcw,
+  Save,
   Send,
   Shield,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Truck,
   User,
   XCircle,
@@ -92,6 +98,26 @@ export function CaseDetailView({
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
 
+  const [currentAnalysis, setCurrentAnalysis] = useState<Analysis | null>(analysis);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  const [currentDraft, setCurrentDraft] = useState<Draft | null>(draft);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  // Edit Draft Mode states
+  const [isEditingDraft, setIsEditingDraft] = useState(false);
+  const [editSummary, setEditSummary] = useState("");
+  const [editSections, setEditSections] = useState<
+    Array<{ heading: string; paragraphs: Array<{ text: string; claimRefs: string[] }> }>
+  >([]);
+  const [editNotes, setEditNotes] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [validatingEdit, setValidatingEdit] = useState(false);
+  const [editGroundingErrors, setEditGroundingErrors] = useState<GroundingError[]>([]);
+  const [approvalInvalidatedNotice, setApprovalInvalidatedNotice] = useState(false);
+
   // Parse draft body JSON if present
   let parsedDraftBody: {
     summary?: string;
@@ -101,9 +127,9 @@ export function CaseDetailView({
     }>;
   } | null = null;
 
-  if (draft?.bodyJson) {
+  if (currentDraft?.bodyJson) {
     try {
-      parsedDraftBody = JSON.parse(draft.bodyJson);
+      parsedDraftBody = JSON.parse(currentDraft.bodyJson);
     } catch {
       parsedDraftBody = null;
     }
@@ -111,9 +137,9 @@ export function CaseDetailView({
 
   // Parse breakdown JSON if present
   let breakdown: Array<{ signal: string; weight: number; satisfied: boolean; notes: string }> = [];
-  if (analysis?.strengthBreakdownJson) {
+  if (currentAnalysis?.strengthBreakdownJson) {
     try {
-      breakdown = JSON.parse(analysis.strengthBreakdownJson);
+      breakdown = JSON.parse(currentAnalysis.strengthBreakdownJson);
     } catch {
       breakdown = [];
     }
@@ -125,15 +151,16 @@ export function CaseDetailView({
   };
 
   let groundingErrors: GroundingError[] = [];
-  if (draft?.groundingErrorsJson) {
+  if (currentDraft?.groundingErrorsJson) {
     try {
-      groundingErrors = JSON.parse(draft.groundingErrorsJson);
+      groundingErrors = JSON.parse(currentDraft.groundingErrorsJson);
     } catch {
       groundingErrors = [];
     }
   }
 
-  const groundingPassed = draft?.groundingStatus === "pass" || draft?.groundingStatus === "edited_pass";
+  const groundingPassed =
+    currentDraft?.groundingStatus === "pass" || currentDraft?.groundingStatus === "edited_pass";
   const citedFactIds = Array.from(
     new Set(
       parsedDraftBody?.sections?.flatMap((section) => section.paragraphs.flatMap((p) => p.claimRefs)) ?? []
@@ -141,6 +168,184 @@ export function CaseDetailView({
   );
   const paragraphCount =
     parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
+
+  async function handleRunAnalysis() {
+    setAnalyzing(true);
+    setAnalysisError(null);
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to analyze dispute");
+      }
+      setCurrentAnalysis(data.analysis);
+      if (caseState === "NEW") {
+        setCaseState("ANALYZED");
+      }
+      setAuditLogList((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          ts: new Date().toISOString(),
+          actor: "agent",
+          disputeId: dispute.paypalDisputeId,
+          action: "DISPUTE_ANALYZED",
+          detailJson: JSON.stringify({
+            recommendation: data.analysis.recommendation,
+            strengthScore: data.analysis.strengthScore,
+          }),
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      setAnalysisError((err as Error).message);
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function handleGenerateDraft() {
+    setGeneratingDraft(true);
+    setDraftError(null);
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/draft`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to generate draft");
+      }
+      setCurrentDraft(data.draft);
+      if (caseState === "NEW" || caseState === "ANALYZED") {
+        setCaseState("DRAFTED");
+      }
+      setAuditLogList((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          ts: new Date().toISOString(),
+          actor: "agent",
+          disputeId: dispute.paypalDisputeId,
+          action: "DRAFT_GENERATED",
+          detailJson: JSON.stringify({
+            draftId: data.draft.id,
+            version: data.draft.version,
+            groundingStatus: data.draft.groundingStatus,
+          }),
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      setDraftError((err as Error).message);
+    } finally {
+      setGeneratingDraft(false);
+    }
+  }
+
+  function startEditingDraft() {
+    if (!currentDraft) return;
+    try {
+      const parsed = JSON.parse(currentDraft.bodyJson);
+      setEditSummary(parsed.summary || "");
+      setEditSections(
+        parsed.sections || [
+          { heading: "Defense Statement", paragraphs: [{ text: "", claimRefs: [] }] },
+        ]
+      );
+      setEditNotes(currentDraft.notesText || "");
+    } catch {
+      setEditSummary("");
+      setEditSections([{ heading: "Defense Statement", paragraphs: [{ text: "", claimRefs: [] }] }]);
+      setEditNotes("");
+    }
+    setEditGroundingErrors([]);
+    setIsEditingDraft(true);
+  }
+
+  async function handleValidateEdits() {
+    setValidatingEdit(true);
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/validate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
+        body: JSON.stringify({
+          summary: editSummary,
+          sections: editSections,
+          notesText: editNotes,
+        }),
+      });
+      const data = await res.json();
+      if (data.groundingResult) {
+        setEditGroundingErrors(data.groundingResult.errors || []);
+      }
+    } catch (err) {
+      console.error("Validation error:", err);
+    } finally {
+      setValidatingEdit(false);
+    }
+  }
+
+  async function handleSaveEditedDraft() {
+    if (!currentDraft) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/draft`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-merchant-auth": "demo-merchant-admin",
+        },
+        body: JSON.stringify({
+          draftId: currentDraft.id,
+          payload: {
+            summary: editSummary,
+            sections: editSections,
+            notesText: editNotes,
+          },
+          notesText: editNotes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to save draft edits");
+      }
+      setCurrentDraft(data.draft);
+      if (data.previousApprovalInvalidated) {
+        setCaseState("DRAFTED");
+        setApprovalInvalidatedNotice(true);
+      }
+      setIsEditingDraft(false);
+      setAuditLogList((prev) => [
+        {
+          id: `aud-${Date.now()}`,
+          ts: new Date().toISOString(),
+          actor: "human",
+          disputeId: dispute.paypalDisputeId,
+          action: "DRAFT_EDITED",
+          detailJson: JSON.stringify({
+            draftId: data.draft.id,
+            previousApprovalInvalidated: data.previousApprovalInvalidated,
+          }),
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      alert((err as Error).message);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   async function handleApproveAndSubmit() {
     if (!approverName.trim()) {
@@ -359,19 +564,19 @@ export function CaseDetailView({
         </div>
 
         <div className="flex items-center gap-2">
-          {draft && groundingPassed && (
+          {currentDraft && groundingPassed && (
             <Badge variant="success" className="gap-1 text-xs">
               <ShieldCheck className="h-3.5 w-3.5" />
               Grounding passed · {paragraphCount} paragraphs, {citedFactIds.length} facts cited
             </Badge>
           )}
-          {draft && draft.groundingStatus === "fail" && (
+          {currentDraft && currentDraft.groundingStatus === "fail" && (
             <Badge variant="destructive" className="gap-1 text-xs">
               <ShieldAlert className="h-3.5 w-3.5" />
               Grounding failed · {groundingErrors.length} {groundingErrors.length === 1 ? "issue" : "issues"}
             </Badge>
           )}
-          {!draft && (
+          {!currentDraft && (
             <Badge variant="outline" className="text-xs">
               No draft yet
             </Badge>
@@ -482,26 +687,36 @@ export function CaseDetailView({
         {/* CENTER COLUMN: Facts, Analysis, and Draft Response (6 cols) */}
         <div className="lg:col-span-6 space-y-6">
           {/* Recommendation Card */}
-          {analysis && (
+          {currentAnalysis ? (
             <Card className="border-primary/20 bg-primary/5">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Badge
-                      variant={recommendationVariant[analysis.recommendation] ?? "outline"}
+                      variant={recommendationVariant[currentAnalysis.recommendation] ?? "outline"}
                       className="text-xs font-bold px-2.5 py-0.5"
                     >
-                      RECOMMENDATION: {analysis.recommendation}
+                      RECOMMENDATION: {currentAnalysis.recommendation}
                     </Badge>
                     <span className="text-xs text-muted-foreground font-medium">
-                      Evidence Strength: <strong>{analysis.strengthScore}%</strong> ({analysis.pWinBand})
+                      Evidence Strength: <strong>{currentAnalysis.strengthScore}%</strong> ({currentAnalysis.pWinBand})
                     </span>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRunAnalysis}
+                    disabled={analyzing}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    {analyzing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                    <span>Re-Analyze</span>
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3 text-xs">
                 <p className="text-foreground leading-relaxed font-medium">
-                  {analysis.rationale}
+                  {currentAnalysis.rationale}
                 </p>
 
                 {/* Deterministic Cost Formula Breakdown */}
@@ -509,18 +724,48 @@ export function CaseDetailView({
                   <div className="text-muted-foreground font-sans font-medium text-xs mb-1">
                     Expected Value Cost Math (Deterministic Code):
                   </div>
-                  <div>Expected Loss (Fight): <strong>{formatMoney(analysis.fightLossMinor, dispute.currency)}</strong> (includes fees & effort)</div>
-                  <div>Loss If Refunded: <strong>{formatMoney(analysis.refundLossMinor, dispute.currency)}</strong></div>
-                  {analysis.refundLossMinor - analysis.fightLossMinor >= 0 ? (
+                  <div>Expected Loss (Fight): <strong>{formatMoney(currentAnalysis.fightLossMinor, dispute.currency)}</strong> (includes fees & effort)</div>
+                  <div>Loss If Refunded: <strong>{formatMoney(currentAnalysis.refundLossMinor, dispute.currency)}</strong></div>
+                  {currentAnalysis.refundLossMinor - currentAnalysis.fightLossMinor >= 0 ? (
                     <div className="text-emerald-700 font-semibold pt-1">
-                      Fighting saves (expected): {formatMoney(analysis.refundLossMinor - analysis.fightLossMinor, dispute.currency)}
+                      Fighting saves (expected): {formatMoney(currentAnalysis.refundLossMinor - currentAnalysis.fightLossMinor, dispute.currency)}
                     </div>
                   ) : (
                     <div className="text-amber-700 font-semibold pt-1">
-                      Fighting costs more (expected): {formatMoney(analysis.fightLossMinor - analysis.refundLossMinor, dispute.currency)}
+                      Fighting costs more (expected): {formatMoney(currentAnalysis.fightLossMinor - currentAnalysis.refundLossMinor, dispute.currency)}
                     </div>
                   )}
                 </div>
+
+                <div className="text-[10px] text-muted-foreground italic flex items-center gap-1">
+                  <ShieldCheck className="h-3 w-3 text-primary" />
+                  AI Decision Support: Financial EV math and scores are calculated by deterministic code; LLM provides explanation.
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-dashed border-primary/40 bg-primary/[0.02]">
+              <CardContent className="p-6 text-center space-y-3">
+                <Sparkles className="h-8 w-8 text-primary mx-auto opacity-80" />
+                <div>
+                  <h3 className="font-semibold text-sm text-foreground">Dispute Evidence Analysis Pending</h3>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
+                    Evaluate evidence strength, calculate EV cost comparison (fight vs refund), and generate an AI-assisted merchant defense rationale.
+                  </p>
+                </div>
+                {analysisError && (
+                  <p className="text-xs text-destructive bg-destructive/10 p-2 rounded max-w-md mx-auto">
+                    {analysisError}
+                  </p>
+                )}
+                <Button
+                  onClick={handleRunAnalysis}
+                  disabled={analyzing}
+                  className="gap-2 text-xs font-semibold"
+                >
+                  {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  Run Evidence Analysis
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -537,14 +782,65 @@ export function CaseDetailView({
                   Every claim is strictly cited to verified fact IDs. Click any chip to inspect source.
                 </p>
               </div>
-              {analysis?.model && (
-                <Badge variant="outline" className="text-[10px] font-mono">
-                  Model: {analysis.model}
-                </Badge>
-              )}
+              <div className="flex items-center gap-2">
+                {currentDraft && !isEditingDraft && (
+                  <>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      v{currentDraft.version}
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateDraft}
+                      disabled={generatingDraft}
+                      className="h-7 text-xs gap-1"
+                    >
+                      {generatingDraft ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                      <span>Regenerate</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={startEditingDraft}
+                      className="h-7 text-xs gap-1"
+                    >
+                      <Edit3 className="h-3 w-3" />
+                      <span>Edit Draft</span>
+                    </Button>
+                  </>
+                )}
+                {isEditingDraft && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsEditingDraft(false)}
+                    className="h-7 text-xs"
+                  >
+                    Cancel Edit
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
-              {groundingErrors.length > 0 && (
+              {draftError && (
+                <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-destructive">
+                  {draftError}
+                </div>
+              )}
+
+              {approvalInvalidatedNotice && (
+                <div role="alert" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold">Previous Approval Invalidated</p>
+                    <p className="text-[11px] opacity-90">
+                      Draft modifications alter the evidence payload. You must re-approve this draft before it can be submitted to PayPal.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {groundingErrors.length > 0 && !isEditingDraft && (
                 <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1.5">
                   <p className="font-semibold text-destructive flex items-center gap-1.5">
                     <ShieldAlert className="h-3.5 w-3.5" />
@@ -559,7 +855,187 @@ export function CaseDetailView({
                   </ul>
                 </div>
               )}
-              {parsedDraftBody ? (
+
+              {/* EDIT MODE INTERFACE */}
+              {isEditingDraft ? (
+                <div className="space-y-4 border rounded-md p-4 bg-muted/10">
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-foreground text-xs">Executive Summary:</label>
+                    <textarea
+                      value={editSummary}
+                      onChange={(e) => setEditSummary(e.target.value)}
+                      rows={2}
+                      className="w-full p-2 text-xs rounded border bg-background text-foreground focus:ring-1 focus:ring-primary focus:outline-none"
+                      placeholder="Summary of the merchant's dispute defense..."
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="font-semibold text-foreground text-xs">Defense Sections & Cited Claims:</label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setEditSections((prev) => [
+                            ...prev,
+                            { heading: "New Defense Section", paragraphs: [{ text: "", claimRefs: [] }] },
+                          ])
+                        }
+                        className="h-6 text-[10px] gap-1"
+                      >
+                        <Plus className="h-3 w-3" /> Add Section
+                      </Button>
+                    </div>
+
+                    {editSections.map((sec, sIdx) => (
+                      <div key={sIdx} className="border rounded p-3 bg-card space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <input
+                            type="text"
+                            value={sec.heading}
+                            onChange={(e) => {
+                              const updated = [...editSections];
+                              updated[sIdx].heading = e.target.value;
+                              setEditSections(updated);
+                            }}
+                            className="flex-1 font-semibold text-xs px-2 py-1 rounded border bg-background text-foreground"
+                            placeholder="Section Heading"
+                          />
+                          {editSections.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditSections(editSections.filter((_, idx) => idx !== sIdx));
+                              }}
+                              className="h-6 text-[10px] text-destructive hover:text-destructive px-2"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
+
+                        {sec.paragraphs.map((p, pIdx) => (
+                          <div key={pIdx} className="space-y-1.5 pl-2 border-l-2 border-primary/30">
+                            <textarea
+                              value={p.text}
+                              onChange={(e) => {
+                                const updated = [...editSections];
+                                updated[sIdx].paragraphs[pIdx].text = e.target.value;
+                                setEditSections(updated);
+                              }}
+                              rows={2}
+                              className="w-full p-2 text-xs rounded border bg-background text-foreground focus:ring-1 focus:ring-primary focus:outline-none"
+                              placeholder="Factual statement regarding fulfillment, tracking, or store policy..."
+                            />
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-muted-foreground whitespace-nowrap">Fact Citations:</span>
+                              <input
+                                type="text"
+                                value={p.claimRefs.join(", ")}
+                                onChange={(e) => {
+                                  const updated = [...editSections];
+                                  updated[sIdx].paragraphs[pIdx].claimRefs = e.target.value
+                                    .split(/[, ]+/)
+                                    .map((s) => s.trim())
+                                    .filter(Boolean);
+                                  setEditSections(updated);
+                                }}
+                                className="flex-1 text-[11px] font-mono px-2 py-1 rounded border bg-background text-foreground"
+                                placeholder="F-ord-001, F-track-002"
+                              />
+                              {sec.paragraphs.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const updated = [...editSections];
+                                    updated[sIdx].paragraphs = updated[sIdx].paragraphs.filter((_, idx) => idx !== pIdx);
+                                    setEditSections(updated);
+                                  }}
+                                  className="h-6 text-[10px] text-muted-foreground hover:text-destructive px-1.5"
+                                >
+                                  Remove
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const updated = [...editSections];
+                            updated[sIdx].paragraphs.push({ text: "", claimRefs: [] });
+                            setEditSections(updated);
+                          }}
+                          className="h-6 text-[10px] gap-1 text-primary"
+                        >
+                          <Plus className="h-3 w-3" /> Add Paragraph
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {editGroundingErrors.length > 0 && (
+                    <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1">
+                      <p className="font-semibold text-destructive flex items-center gap-1.5 text-xs">
+                        <ShieldAlert className="h-3.5 w-3.5" />
+                        Grounding Validation Issues Found:
+                      </p>
+                      <ul className="list-disc pl-5 space-y-1 text-foreground text-[11px]">
+                        {editGroundingErrors.map((err, idx) => (
+                          <li key={idx}>
+                            <span className="font-mono text-destructive">{err.code}</span>: {err.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-2 border-t">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleValidateEdits}
+                      disabled={validatingEdit}
+                      className="text-xs gap-1.5"
+                    >
+                      {validatingEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-primary" />}
+                      Check Grounding
+                    </Button>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsEditingDraft(false)}
+                        className="text-xs"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleSaveEditedDraft}
+                        disabled={savingEdit}
+                        className="text-xs font-semibold gap-1.5"
+                      >
+                        {savingEdit ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                        Save Edits & Revalidate
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : currentDraft && parsedDraftBody ? (
                 <div className="space-y-4">
                   <div className="p-3 bg-muted/30 rounded-md border text-muted-foreground italic">
                     <strong>Summary:</strong> {parsedDraftBody.summary}
@@ -599,7 +1075,24 @@ export function CaseDetailView({
                   ))}
                 </div>
               ) : (
-                <p className="text-muted-foreground italic">No draft response generated yet.</p>
+                <div className="p-6 text-center space-y-3 bg-muted/10 rounded-md border border-dashed">
+                  <FileText className="h-8 w-8 text-muted-foreground mx-auto opacity-60" />
+                  <div>
+                    <h4 className="font-semibold text-foreground text-xs">No Evidence Draft Generated</h4>
+                    <p className="text-muted-foreground text-[11px] mt-0.5">
+                      Synthesize facts from the verified fact base into a structured, claim-cited merchant defense.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleGenerateDraft}
+                    disabled={generatingDraft}
+                    size="sm"
+                    className="gap-1.5 text-xs font-semibold"
+                  >
+                    {generatingDraft ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
+                    Generate Grounded AI Draft
+                  </Button>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -697,7 +1190,7 @@ export function CaseDetailView({
               <Button
                 onClick={() => setShowApprovalModal(true)}
                 disabled={
-                  !draft ||
+                  !currentDraft ||
                   !groundingPassed ||
                   caseState === "SUBMITTED" ||
                   caseState === "RESOLVED" ||
@@ -718,10 +1211,10 @@ export function CaseDetailView({
                   </>
                 )}
               </Button>
-              {!draft && (
+              {!currentDraft && (
                 <p className="text-[11px] text-muted-foreground">Approval unlocks once an evidence draft exists.</p>
               )}
-              {draft && !groundingPassed && (
+              {currentDraft && !groundingPassed && (
                 <p className="text-[11px] text-destructive">
                   Approval is blocked until the draft passes grounding.
                 </p>
@@ -846,7 +1339,7 @@ export function CaseDetailView({
           </div>
           <div>
             <dt className="font-semibold">Evidence type</dt>
-            <dd className="font-mono">{draft?.evidenceType ?? "—"}</dd>
+            <dd className="font-mono">{currentDraft?.evidenceType ?? "—"}</dd>
           </div>
           {order?.carrier && order.trackingNumber && (
             <div>
@@ -858,7 +1351,7 @@ export function CaseDetailView({
           )}
           <div>
             <dt className="font-semibold">Notes sent to PayPal</dt>
-            <dd className="whitespace-pre-wrap">{draft?.notesText || "—"}</dd>
+            <dd className="whitespace-pre-wrap">{currentDraft?.notesText || "—"}</dd>
           </div>
           <div>
             <dt className="font-semibold">Cited facts ({citedFactIds.length})</dt>
@@ -869,7 +1362,7 @@ export function CaseDetailView({
             <dd>
               {groundingPassed
                 ? "Passed"
-                : `Not passed (${draft?.groundingStatus ?? "no draft"})`}
+                : `Not passed (${currentDraft?.groundingStatus ?? "no draft"})`}
             </dd>
           </div>
         </dl>

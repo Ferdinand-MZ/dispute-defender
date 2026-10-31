@@ -31,13 +31,40 @@ export function verifyMerchantAuth(
   expectedDisputeMerchantId?: string
 ): AuthResult {
   // CSRF Check: Reject cross-site mutating requests
-  const secFetchSite = req.headers.get("sec-fetch-site");
-  if (secFetchSite === "cross-site") {
-    return {
-      authenticated: false,
-      error: "Cross-site request blocked: CSRF protection triggered",
-      status: 403,
-    };
+  const method = req.method.toUpperCase();
+  const isMutating = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+
+  if (isMutating) {
+    const secFetchSite = req.headers.get("sec-fetch-site");
+    if (secFetchSite === "cross-site") {
+      return {
+        authenticated: false,
+        error: "Cross-site request blocked: CSRF protection triggered",
+        status: 403,
+      };
+    }
+
+    // Fallback: If Sec-Fetch-Site is absent, inspect Origin header
+    const origin = req.headers.get("origin");
+    const host = req.headers.get("host");
+    if (origin && host) {
+      try {
+        const originHost = new URL(origin).host;
+        if (originHost !== host) {
+          return {
+            authenticated: false,
+            error: "Cross-origin request blocked: CSRF origin mismatch",
+            status: 403,
+          };
+        }
+      } catch {
+        return {
+          authenticated: false,
+          error: "Malformed origin header blocked",
+          status: 403,
+        };
+      }
+    }
   }
 
   // 1. Resolve configured valid password / key

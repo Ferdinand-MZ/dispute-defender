@@ -13,6 +13,7 @@ import {
   formatDemoSimulationResponse,
   PayPalConfigError,
 } from "@/lib/mode";
+import { acquireActionLock, releaseActionLock } from "@/lib/concurrency";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,14 @@ export async function POST(
 
     const approvedBy = parseResult.data?.approvedBy?.trim() || auth.user.name;
     const { noteToPayer } = parseResult.data;
+
+    // Concurrency Lock: Prevent simultaneous concurrent refunds for the same dispute
+    if (!acquireActionLock(disputeId, "refund")) {
+      return NextResponse.json(
+        { error: "Concurrent refund in progress: An operation is already pending for this dispute." },
+        { status: 409 }
+      );
+    }
 
     // 2. Fetch Dispute Record
     const disputeRows = await db
@@ -244,5 +253,7 @@ export async function POST(
       { error: (err as Error).message || "Internal error during refund processing" },
       { status: 500 }
     );
+  } finally {
+    releaseActionLock(disputeId, "refund");
   }
 }

@@ -144,6 +144,18 @@ Daftar lengkap ada di `02-ARCHITECTURE.md` bagian 12. Tiga yang paling mungkin m
 ## 7. Status Pelaksanaan Terverifikasi
 
 ### Tugas yang Selesai dan Terverifikasi
+- **T15 (Draft Writer & Validator Grounding):**
+  - Implementasi di `src/lib/agent/draft.ts` dengan Zod structured output (`DraftPayloadSchema`) dan isolasi data tidak tepercaya via `wrapUntrusted()`.
+  - Validator grounding di `src/lib/agent/grounding.ts` (verifikasi tanggal, deteksi resi asing, larangan URL eksternal, dan kelengkapan rujukan fakta).
+  - Mekanisme 1 kali retry regenerasi otomatis saat grounding gagal.
+  - Endpoint `POST /api/cases/[id]/draft`, `PUT /api/cases/[id]/draft` (edit & revalidasi dengan pencabutan status approval otomatis), dan `POST /api/cases/[id]/validate`.
+- **T16 (Skor Kekuatan Bukti & Dukungan Keputusan):**
+  - Implementasi di `src/lib/agent/analyze.ts` dengan kalkulasi deterministik skor kekuatan bukti (0–100) dan perbandingan nilai harapan biaya (EV math: `EV_fight` vs `Cost_refund`).
+  - Rasional merchant 2–3 kalimat dari LLM (Gemini / AI SDK) dengan fallback offline deterministik.
+  - Endpoint `POST /api/cases/[id]/analyze` yang mengubah state dari `NEW` ke `ANALYZED`.
+- **T17 (UI Detail Kasus & Editor Copilot Interaktif):**
+  - Komponen `src/components/case-detail-view.tsx` dilengkapi kartu rekomendasi AI, visualisasi skor kekuatan bukti & metrik EV, tombol interaktif "Run Evidence Analysis" dan "Generate Grounded AI Draft".
+  - Editor draft interaktif dengan chip sitasi fakta yang dapat diklik untuk melompat ke panel fakta, tombol "Check Grounding", "Save Edits & Revalidate", dan notifikasi pembatalan status approval jika draft diedit.
 - **T18 (Alur Persetujuan Manusia):** Endpoint `POST /api/cases/[id]/approve` dan modal persetujuan interaktif di UI. Memvalidasi bahwa draft harus lolos grounding sebelum disetujui, mencatat `approvedBy`, dan mengupdate state ke `APPROVED`.
 - **T11 (Pengiriman Bukti Berbasis Aturan & Human Gate):** Endpoint `POST /api/cases/[id]/submit`. Memvalidasi status `APPROVED`, membangun payload bukti dari order & draft, memanggil `provideDisputeEvidence` (dengan fallback simulasi sandbox saat credentials lokal kosong), dan mengupdate state ke `SUBMITTED`.
 - **T19 (Aksi Terima Klaim & Refund):**
@@ -159,9 +171,9 @@ Daftar lengkap ada di `02-ARCHITECTURE.md` bagian 12. Tiga yang paling mungkin m
 - `pnpm install --frozen-lockfile`: Bersih, lockfile konsisten.
 - `pnpm run typecheck`: 0 error (TypeScript strict).
 - `pnpm run lint`: 0 error / warning (ESLint).
-- `pnpm run test`: 15 file tes lulus, 69 tes lulus tanpa regresi.
+- `pnpm run test`: 17 file tes lulus, 95 tes lulus tanpa regresi (termasuk 15 tes Copilot & 11 tes Security).
 - `pnpm run build`: Build Next.js 14 App Router sukses, seluruh 13 route server/static teroptimasi.
 
 ### Blocker & Risiko yang Tersisa
 - Kredensial live PayPal Sandbox (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`) belum disetel di shell lokal; integrasi diuji dengan mock/fixture dan defensive handling yang siap untuk eksekusi langsung begitu variabel lingkungan disediakan.
-- Sisa tugas AI drafting otomatis (`draft.ts` dan `analyze.ts`) untuk melengkapi regenerasi draft dinamis via LLM di luar draft template.
+- Sisa tugas Fase 2/3: T20 (paket bukti PDF via `pdf-lib`), T21 (cron tenggat kasus), dan T27 (`demo:reset`).

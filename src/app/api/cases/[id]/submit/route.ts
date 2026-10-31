@@ -15,6 +15,7 @@ import {
   PayPalConfigError,
 } from "@/lib/mode";
 import { computeDraftApprovalHash } from "@/lib/agent/approval";
+import { acquireActionLock, releaseActionLock } from "@/lib/concurrency";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,14 @@ export async function POST(
     }
 
     const approvedBy = parseResult.data?.approvedBy?.trim() || auth.user.name;
+
+    // Concurrency Lock: Prevent simultaneous concurrent submissions for the same dispute
+    if (!acquireActionLock(disputeId, "submit")) {
+      return NextResponse.json(
+        { error: "Concurrent submission in progress: An operation is already pending for this dispute." },
+        { status: 409 }
+      );
+    }
 
     // 2. Fetch Dispute Record
     const disputeRows = await db
@@ -346,5 +355,7 @@ export async function POST(
       { error: (err as Error).message || "Internal error during evidence submission" },
       { status: 500 }
     );
+  } finally {
+    releaseActionLock(disputeId, "submit");
   }
 }

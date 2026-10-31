@@ -13,6 +13,7 @@ import {
   formatDemoSimulationResponse,
   PayPalConfigError,
 } from "@/lib/mode";
+import { acquireActionLock, releaseActionLock } from "@/lib/concurrency";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,14 @@ export async function POST(
 
     const approvedBy = parseResult.data?.approvedBy?.trim() || auth.user.name;
     const { note } = parseResult.data;
+
+    // Concurrency Lock: Prevent simultaneous concurrent claim acceptance for the same dispute
+    if (!acquireActionLock(disputeId, "accept")) {
+      return NextResponse.json(
+        { error: "Concurrent claim acceptance in progress: An operation is already pending for this dispute." },
+        { status: 409 }
+      );
+    }
 
     // 2. Fetch Dispute Record
     const disputeRows = await db
@@ -194,5 +203,7 @@ export async function POST(
       { error: (err as Error).message || "Internal error during claim acceptance" },
       { status: 500 }
     );
+  } finally {
+    releaseActionLock(disputeId, "accept");
   }
 }

@@ -539,4 +539,46 @@ describe("DisputeDefender Security & Financial Hardening Tests", () => {
     const csrfData = await csrfRes.json();
     expect(csrfData.error).toMatch(/CSRF protection triggered/i);
   });
+
+  // 11. Concurrent financial operations race condition protection
+  it("Scenario 11: Blocks concurrent financial operations on the same dispute with 409 Conflict", async () => {
+    mockDisputeStore.set("PP-D-SEC-01", {
+      ...mockDisputeStore.get("PP-D-SEC-01"),
+      caseState: "DRAFTED",
+    });
+
+    // Make mockRefundCapture hang until released so we can send a simultaneous concurrent request
+    let resolveFirstRefund: (val: any) => void;
+    mockRefundCapture.mockImplementationOnce(() => {
+      return new Promise((resolve) => {
+        resolveFirstRefund = resolve;
+      });
+    });
+
+    const req1 = new NextRequest("http://localhost:3000/api/cases/PP-D-SEC-01/refund", {
+      method: "POST",
+      headers: VALID_AUTH_HEADERS,
+      body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
+    });
+
+    const req2 = new NextRequest("http://localhost:3000/api/cases/PP-D-SEC-01/refund", {
+      method: "POST",
+      headers: VALID_AUTH_HEADERS,
+      body: JSON.stringify({ approvedBy: "Sarah Jenkins" }),
+    });
+
+    // Fire first request (acquires lock and awaits network)
+    const promise1 = refundHandler(req1, { params: { id: "PP-D-SEC-01" } });
+
+    // Fire second request simultaneously while first is in-flight
+    const res2 = await refundHandler(req2, { params: { id: "PP-D-SEC-01" } });
+    expect(res2.status).toBe(409);
+    const data2 = await res2.json();
+    expect(data2.error).toMatch(/Concurrent refund in progress/i);
+
+    // Release first refund
+    resolveFirstRefund!({ id: "REF-CONC-01", status: "COMPLETED" });
+    const res1 = await promise1;
+    expect(res1.status).toBe(200);
+  });
 });
