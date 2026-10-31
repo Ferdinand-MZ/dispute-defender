@@ -4,7 +4,14 @@ import { disputes, actions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { adjudicateSandboxDispute, AdjudicationOutcome } from "@/lib/paypal/disputes";
 import { logAudit } from "@/lib/audit";
-import { env } from "@/lib/env";
+import { verifyAdminAuth } from "@/lib/auth";
+import {
+  isDemoMode,
+  isSandboxMode,
+  assertSandboxCredentials,
+  formatDemoSimulationResponse,
+  PayPalConfigError,
+} from "@/lib/mode";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -12,11 +19,20 @@ export const dynamic = "force-dynamic";
 const AdjudicateRequestSchema = z.object({
   disputeId: z.string().min(1, "disputeId is required"),
   outcome: z.enum(["SELLER_FAVOR", "BUYER_FAVOR"]),
-  approvedBy: z.string().min(1).default("Merchant Admin Simulator"),
+  approvedBy: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Strict Server-Side Admin Authentication Gate
+    const auth = verifyAdminAuth(req);
+    if (!auth.authenticated || !auth.user) {
+      return NextResponse.json(
+        { error: auth.error || "Administrative authentication required" },
+        { status: auth.status || 401 }
+      );
+    }
+
     const rawBody = await req.json().catch(() => ({}));
     const parseResult = AdjudicateRequestSchema.safeParse(rawBody);
 
@@ -27,32 +43,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { disputeId, outcome, approvedBy } = parseResult.data;
+    const { disputeId, outcome } = parseResult.data;
+    const approvedBy = parseResult.data.approvedBy?.trim() || auth.user.name;
 
-    // 1. Fetch Dispute Record
+    // 2. Fetch Dispute Record & Verify Existence
     const disputeRows = await db
       .select()
       .from(disputes)
       .where(eq(disputes.paypalDisputeId, disputeId));
 
     if (!disputeRows.length) {
-      return NextResponse.json({ error: `Dispute '${disputeId}' not found in database.` }, { status: 404 });
+      return NextResponse.json(
+        { error: `Dispute '${disputeId}' not found in database.` },
+        { status: 404 }
+      );
     }
 
-    // 2. Call PayPal Sandbox Adjudication Endpoint
-    let paypalResponse: Record<string, unknown> = { outcome };
+    // 3. Server-Controlled Mode Execution Gate
+    let paypalResponse: Record<string, unknown>;
 
-    if (env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET) {
+    if (isDemoMode()) {
+      // DEMO MODE: Pure simulation, never contacts PayPal API
+      paypalResponse = formatDemoSimulationResponse("adjudicate", {
+        disputeId,
+        outcome,
+      });
+    } else {
+      // SANDBOX MODE: Communicate with PayPal Sandbox API
+      try {
+        assertSandboxCredentials();
+      } catch (configErr) {
+        if (configErr instanceof PayPalConfigError) {
+          return NextResponse.json(
+            { error: configErr.message, mode: "sandbox" },
+            { status: configErr.statusCode }
+          );
+        }
+        throw configErr;
+      }
+
       await adjudicateSandboxDispute(disputeId, outcome as AdjudicationOutcome, approvedBy);
+
       paypalResponse = {
+        mode: "sandbox",
+        simulated: false,
         status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
         endpoint: `/v1/customer/disputes/${disputeId}/adjudicate`,
-        outcome,
-      };
-    } else {
-      paypalResponse = {
-        status: "SIMULATED_SANDBOX_SUCCESS",
-        note: "Simulated PayPal dispute adjudication",
         outcome,
       };
     }
@@ -60,7 +96,7 @@ export async function POST(req: NextRequest) {
     const now = new Date().toISOString();
     const actionId = `act_${Date.now()}_adj`;
 
-    // 3. Update Database State
+    // 4. Update Database State
     db.transaction((tx) => {
       tx.update(disputes)
         .set({
@@ -85,12 +121,18 @@ export async function POST(req: NextRequest) {
         .run();
     });
 
-    // 4. Log Immutable Audit Record
+    // 5. Log Immutable Audit Record
     await logAudit({
       actor: "system",
       disputeId,
       action: `DISPUTE_ADJUDICATED_${outcome}`,
-      detail: { outcome, approvedBy, caseState: "RESOLVED" },
+      detail: {
+        outcome,
+        approvedBy,
+        caseState: "RESOLVED",
+        mode: isDemoMode() ? "demo" : "sandbox",
+        simulated: isDemoMode(),
+      },
     });
 
     return NextResponse.json({
@@ -99,6 +141,9 @@ export async function POST(req: NextRequest) {
       outcome,
       caseState: "RESOLVED",
       actionId,
+      mode: isDemoMode() ? "demo" : "sandbox",
+      simulated: isDemoMode(),
+      paypalResponse,
     });
   } catch (err) {
     return NextResponse.json(
