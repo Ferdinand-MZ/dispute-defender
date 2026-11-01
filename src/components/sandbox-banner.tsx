@@ -1,17 +1,19 @@
-import { ShieldAlert } from "lucide-react";
+import { FlaskConical } from "lucide-react";
 
+// Navy-tinted rather than amber: amber is reserved for deadline urgency.
 export function SandboxBanner() {
   return (
-    <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 text-xs font-medium text-amber-900 flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <ShieldAlert className="h-4 w-4 text-amber-600" />
+    <div className="border-b bg-secondary px-4 py-2 text-[13px] text-foreground sm:px-6 lg:px-8">
+      <p className="flex items-start gap-2 sm:items-center">
+        <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-navy sm:mt-0" aria-hidden="true" />
         <span>
-          <strong>PAYPAL SANDBOX MODE:</strong> Real money movement is disabled. All API operations hit <code className="bg-amber-100/80 px-1 py-0.5 rounded text-[11px]">api-m.sandbox.paypal.com</code>.
+          <strong className="font-semibold">PayPal Sandbox.</strong> No real money moves.
+          <span className="hidden text-muted-foreground sm:inline">
+            {" "}
+            Every call goes to <span className="font-mono text-xs">api-m.sandbox.paypal.com</span>.
+          </span>
         </span>
-      </div>
-      <span className="text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-mono">
-        Strict Grounding Active
-      </span>
+      </p>
     </div>
   );
 }
