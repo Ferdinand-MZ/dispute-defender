@@ -1,20 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { formatMoney } from "@/lib/money";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+import { humanizeEnum } from "@/lib/case-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ShoppingBag, Truck, CheckCircle2, ArrowRight, Loader2 } from "lucide-react";
+import { PageHeader } from "@/components/case-status";
+import { CircleAlert, CircleCheck, Headphones, Lamp, Loader2, Shirt, Truck } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 
-interface CatalogItem {
+export interface CatalogItem {
   sku: string;
   name: string;
   description: string;
   priceMinor: number;
-  image: string;
+  icon: "earbuds" | "lamp" | "jacket";
   scenario: string;
+  scenarioNote: string;
 }
 
 interface OrderItem {
@@ -32,6 +36,23 @@ interface OrderItem {
   createdAt: string;
 }
 
+const ICONS = { earbuds: Headphones, lamp: Lamp, jacket: Shirt };
+
+// Fixed locale and UTC so server and browser render identical text.
+const dateFormat = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" });
+
+const STEPS = [
+  { title: "Buy a product", body: "Creates a captured PayPal Sandbox order." },
+  { title: "Ship it", body: "Adds FedEx tracking and sends it to PayPal." },
+  { title: "Open a dispute", body: "Use the Simulator with the order ID." },
+];
+
+function statusVariant(status: string) {
+  if (status === "delivered") return "success" as const;
+  if (status === "shipped") return "info" as const;
+  return "secondary" as const;
+}
+
 export function DemoShopClient({
   catalog,
   initialOrders,
@@ -42,11 +63,11 @@ export function DemoShopClient({
   const router = useRouter();
   const [loadingSku, setLoadingSku] = useState<string | null>(null);
   const [shippingOrderId, setShippingOrderId] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
   async function handleCheckout(item: CatalogItem) {
     setLoadingSku(item.sku);
-    setStatusMessage(null);
+    setStatus(null);
     try {
       const res = await fetch("/api/demo-shop/orders", {
         method: "POST",
@@ -64,10 +85,10 @@ export function DemoShopClient({
       }
 
       const data = await res.json();
-      setStatusMessage(`Order ${data.orderId} created successfully! Marked as 'paid'.`);
+      setStatus({ ok: true, text: `Order ${data.orderId} is paid. Ship it next so PayPal gets the tracking.` });
       router.refresh();
     } catch (err) {
-      setStatusMessage(`Error creating order: ${(err as Error).message}`);
+      setStatus({ ok: false, text: `Couldn't create the order: ${(err as Error).message}` });
     } finally {
       setLoadingSku(null);
     }
@@ -75,7 +96,7 @@ export function DemoShopClient({
 
   async function handleShip(orderId: string) {
     setShippingOrderId(orderId);
-    setStatusMessage(null);
+    setStatus(null);
     try {
       const res = await fetch("/api/demo-shop/ship", {
         method: "POST",
@@ -92,161 +113,211 @@ export function DemoShopClient({
 
       const data = await res.json();
       const trackingMsg = data.trackingSubmitted
-        ? "Carrier tracking sent to PayPal POST /v1/shipping/trackers-batch!"
-        : "Carrier tracking recorded locally (sandbox demo).";
-      setStatusMessage(`Order ${orderId} marked as shipped! Tracking: ${data.carrier} ${data.trackingNumber}. ${trackingMsg}`);
+        ? "Tracking sent to PayPal."
+        : "Tracking saved locally (sandbox demo).";
+      setStatus({ ok: true, text: `Order ${orderId} shipped with ${data.carrier} ${data.trackingNumber}. ${trackingMsg}` });
       router.refresh();
     } catch (err) {
-      setStatusMessage(`Error shipping order: ${(err as Error).message}`);
+      setStatus({ ok: false, text: `Couldn't ship the order: ${(err as Error).message}` });
     } finally {
       setShippingOrderId(null);
     }
   }
 
+  const shipButton = (order: OrderItem, className?: string) =>
+    order.status === "paid" ? (
+      <Button
+        size="sm"
+        variant="secondary"
+        className={className}
+        disabled={shippingOrderId === order.id}
+        onClick={() => handleShip(order.id)}
+      >
+        {shippingOrderId === order.id ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <Truck className="h-4 w-4" aria-hidden="true" />
+        )}
+        {shippingOrderId === order.id ? "Shipping…" : "Ship with tracking"}
+      </Button>
+    ) : null;
+
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <ShoppingBag className="h-6 w-6 text-primary" />
-            Sandbox Demo Storefront
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Demonstrates real PayPal checkout orders linked to merchant shipping tracking and policy fact base.
-          </p>
-        </div>
-        <Badge variant="outline" className="font-mono text-xs bg-muted/30">
-          DEMO STORE • SANDBOX ONLY
-        </Badge>
-      </div>
+      <PageHeader
+        title="Demo store"
+        description="Create real PayPal Sandbox orders to dispute later. Nothing here charges real money."
+      />
 
-      {statusMessage && (
-        <div className="p-3 bg-primary/10 border border-primary/20 text-primary text-xs rounded-md flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{statusMessage}</span>
-        </div>
-      )}
-
-      {/* Catalog Grid */}
-      <div className="grid gap-6 md:grid-cols-3">
-        {catalog.map((item) => (
-          <Card key={item.sku} className="flex flex-col justify-between">
-            <CardHeader>
-              <div className="text-4xl mb-2">{item.image}</div>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">{item.name}</CardTitle>
-              </div>
-              <Badge variant="secondary" className="text-[10px] w-fit mt-1">
-                {item.scenario}
-              </Badge>
-              <CardDescription className="mt-2 text-xs leading-relaxed">
-                {item.description}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">
-                {formatMoney(item.priceMinor, "USD")}
-              </div>
-            </CardContent>
-            <CardFooter className="pt-0">
-              <Button
-                className="w-full text-xs font-semibold gap-1.5"
-                variant="default"
-                disabled={loadingSku === item.sku}
-                onClick={() => handleCheckout(item)}
-              >
-                {loadingSku === item.sku ? (
+      <ol className="grid gap-4 rounded-xl border bg-card p-5 sm:grid-cols-3">
+        {STEPS.map((step, i) => (
+          <li key={step.title} className="flex gap-3">
+            <span
+              aria-hidden="true"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-navy text-[13px] font-semibold text-white"
+            >
+              {i + 1}
+            </span>
+            <div>
+              <p className="text-sm font-medium text-foreground">{step.title}</p>
+              <p className="text-sm text-muted-foreground">
+                {i === 2 ? (
                   <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Processing Order...</span>
+                    Use the{" "}
+                    <Link href="/admin/simulate" className="font-medium text-primary hover:underline">
+                      Simulator
+                    </Link>{" "}
+                    with the order ID.
                   </>
                 ) : (
-                  <>
-                    <span>PayPal Sandbox Checkout</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </>
+                  step.body
                 )}
-              </Button>
-            </CardFooter>
-          </Card>
+              </p>
+            </div>
+          </li>
         ))}
-      </div>
+      </ol>
 
-      {/* Existing Orders Table */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-sm text-foreground">Store Orders & Fulfillment Status</h3>
-          <span className="text-xs text-muted-foreground">{initialOrders.length} orders on file</span>
+      {status && (
+        <p
+          role={status.ok ? "status" : "alert"}
+          className={cn(
+            "flex items-start gap-2 rounded-xl p-4 text-sm font-medium",
+            status.ok ? "bg-success-soft text-success" : "bg-destructive-soft text-destructive"
+          )}
+        >
+          {status.ok ? (
+            <CircleCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+          {status.text}
+        </p>
+      )}
+
+      <section aria-labelledby="products" className="space-y-3">
+        <h2 id="products" className="text-lg font-semibold text-foreground">
+          Products
+        </h2>
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {catalog.map((item) => {
+            const Icon = ICONS[item.icon];
+            return (
+              <li key={item.sku} className="flex flex-col rounded-xl border bg-card">
+                <div className="flex h-32 items-center justify-center rounded-t-xl bg-accent/70">
+                  <Icon className="h-14 w-14 text-navy" strokeWidth={1.25} aria-hidden="true" />
+                </div>
+                <div className="flex flex-1 flex-col p-5">
+                  <h3 className="font-medium text-foreground">{item.name}</h3>
+                  <p className="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
+                    {formatMoney(item.priceMinor, "USD")}
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">{item.description}</p>
+                  <p className="mb-4 mt-3 text-xs font-medium text-muted-foreground">
+                    {item.scenario} · {item.scenarioNote}
+                  </p>
+                  <Button
+                    className="mt-auto w-full"
+                    disabled={loadingSku === item.sku}
+                    onClick={() => handleCheckout(item)}
+                  >
+                    {loadingSku === item.sku && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                    {loadingSku === item.sku ? "Placing order…" : "Buy with PayPal Sandbox"}
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="orders" className="space-y-3">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 id="orders" className="text-lg font-semibold text-foreground">
+            Orders
+          </h2>
+          <span className="text-sm text-muted-foreground">{initialOrders.length} on file</span>
         </div>
 
-        <div className="rounded-lg border bg-card overflow-hidden">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-muted/50 border-b text-muted-foreground font-medium">
-              <tr>
-                <th className="py-2.5 px-4">Order ID</th>
-                <th className="py-2.5 px-4">Buyer</th>
-                <th className="py-2.5 px-4">Amount</th>
-                <th className="py-2.5 px-4">Fulfillment Status</th>
-                <th className="py-2.5 px-4">Carrier & Tracking</th>
-                <th className="py-2.5 px-4">Delivery Date</th>
-                <th className="py-2.5 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {initialOrders.map((order) => (
-                <tr key={order.id} className="hover:bg-muted/20">
-                  <td className="py-3 px-4 font-mono font-medium text-foreground">{order.id}</td>
-                  <td className="py-3 px-4">
-                    <div className="font-medium">{order.buyerName || "Sandbox Buyer"}</div>
-                    <div className="text-muted-foreground text-[11px]">{order.buyerEmail}</div>
-                  </td>
-                  <td className="py-3 px-4 font-semibold">{formatMoney(order.amountMinor, order.currency)}</td>
-                  <td className="py-3 px-4">
-                    <Badge variant="outline" className="uppercase text-[10px]">
-                      {order.status}
-                    </Badge>
-                  </td>
-                  <td className="py-3 px-4 font-mono text-[11px]">
-                    {order.trackingNumber ? (
-                      <span className="text-primary font-medium">
-                        {order.carrier} • {order.trackingNumber}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground italic">Unassigned</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-muted-foreground">
-                    {order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString() : "Pending scan"}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    {order.status === "paid" ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        className="text-[11px] h-7 gap-1 font-medium"
-                        disabled={shippingOrderId === order.id}
-                        onClick={() => handleShip(order.id)}
-                      >
-                        {shippingOrderId === order.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
+        {initialOrders.length === 0 ? (
+          <div className="rounded-xl border border-dashed bg-card px-6 py-10 text-center text-sm text-muted-foreground">
+            No orders yet. Buy a product above to create one.
+          </div>
+        ) : (
+          <>
+            {/* Desktop */}
+            <div className="hidden overflow-hidden rounded-xl border bg-card lg:block">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b bg-muted text-[13px] font-semibold text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-4 py-3">Order</th>
+                    <th scope="col" className="px-4 py-3">Buyer</th>
+                    <th scope="col" className="px-4 py-3 text-right">Amount</th>
+                    <th scope="col" className="px-4 py-3">Status</th>
+                    <th scope="col" className="px-4 py-3">Tracking</th>
+                    <th scope="col" className="px-4 py-3">Delivered</th>
+                    <th scope="col" className="px-4 py-3 text-right">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {initialOrders.map((order) => (
+                    <tr key={order.id}>
+                      <td className="px-4 py-3 font-mono text-xs text-foreground">{order.id}</td>
+                      <td className="px-4 py-3">
+                        <div className="text-foreground">{order.buyerName || "Sandbox buyer"}</div>
+                        <div className="text-xs text-muted-foreground">{order.buyerEmail}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                        {formatMoney(order.amountMinor, order.currency)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={statusVariant(order.status)}>{humanizeEnum(order.status)}</Badge>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {order.trackingNumber ? (
+                          `${order.carrier} ${order.trackingNumber}`
                         ) : (
-                          <Truck className="h-3 w-3 text-primary" />
+                          <span className="font-sans text-sm text-muted-foreground">Not shipped</span>
                         )}
-                        <span>Mark Shipped & Send Tracking</span>
-                      </Button>
-                    ) : order.status === "shipped" || order.status === "delivered" ? (
-                      <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
-                        Tracking Sent
-                      </Badge>
-                    ) : null}
-                  </td>
-                </tr>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {order.deliveredAt ? dateFormat.format(new Date(order.deliveredAt)) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right">{shipButton(order)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Phone and tablet */}
+            <ul className="grid gap-3 sm:grid-cols-2 lg:hidden">
+              {initialOrders.map((order) => (
+                <li key={order.id} className="rounded-xl border bg-card p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs text-muted-foreground">{order.id}</p>
+                      <p className="mt-0.5 font-medium text-foreground">{order.buyerName || "Sandbox buyer"}</p>
+                    </div>
+                    <p className="font-semibold tabular-nums">{formatMoney(order.amountMinor, order.currency)}</p>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                    <Badge variant={statusVariant(order.status)}>{humanizeEnum(order.status)}</Badge>
+                    {order.trackingNumber && (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {order.carrier} {order.trackingNumber}
+                      </span>
+                    )}
+                  </div>
+                  {shipButton(order, "mt-3 w-full")}
+                </li>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </ul>
+          </>
+        )}
+      </section>
     </div>
   );
 }

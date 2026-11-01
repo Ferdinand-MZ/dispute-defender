@@ -273,7 +273,7 @@ export async function seed(db = defaultDb) {
       disputeId: "PP-D-1001",
       kind: "order",
       label: "Order Summary",
-      value: "Order O-1001 placed on 8 days ago for 1x Wireless Noise-Canceling Earbuds ($48.00 USD).",
+      value: "Order O-1001 placed 8 days ago for 1x Wireless Noise-Canceling Earbuds ($48.00 USD).",
       source: "orders:O-1001",
       untrusted: 0,
     },

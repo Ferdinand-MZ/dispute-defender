@@ -1,84 +1,157 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ShieldCheck,
-  LayoutDashboard,
-  Inbox,
-  ShoppingBag,
-  SlidersHorizontal,
-  FileText,
-  HelpCircle,
-} from "lucide-react";
+import { Inbox, LayoutDashboard, Menu, ShieldCheck, ShoppingBag, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const navigation = [
+const primaryNav = [
   { name: "Overview", href: "/", icon: LayoutDashboard },
-  { name: "Dispute Queue", href: "/cases", icon: Inbox },
-  { name: "Demo Storefront", href: "/demo-shop", icon: ShoppingBag },
-  { name: "Sandbox Simulator", href: "/admin/simulate", icon: SlidersHorizontal },
+  { name: "Dispute queue", href: "/cases", icon: Inbox },
 ];
+
+const sandboxNav = [
+  { name: "Demo store", href: "/demo-shop", icon: ShoppingBag },
+  { name: "Simulator", href: "/admin/simulate", icon: SlidersHorizontal },
+];
+
+function isActive(pathname: string, href: string): boolean {
+  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+}
+
+function Brand() {
+  return (
+    <Link href="/" className="flex items-center gap-2.5 rounded-md">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
+        <ShieldCheck className="h-[18px] w-[18px]" aria-hidden="true" />
+      </span>
+      <span className="text-[15px] font-semibold tracking-tight text-white">DisputeDefender</span>
+    </Link>
+  );
+}
+
+function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const renderLink = (item: (typeof primaryNav)[number]) => {
+    const active = isActive(pathname, item.href);
+    return (
+      <li key={item.href}>
+        <Link
+          href={item.href}
+          onClick={onNavigate}
+          aria-current={active ? "page" : undefined}
+          className={cn(
+            "flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors duration-150",
+            active ? "bg-white text-navy" : "text-navy-foreground hover:bg-navy-raised hover:text-white"
+          )}
+        >
+          <item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+          {item.name}
+        </Link>
+      </li>
+    );
+  };
+
+  return (
+    <nav aria-label="Main" className="flex flex-1 flex-col gap-6 px-3 py-5">
+      <ul className="space-y-1">{primaryNav.map(renderLink)}</ul>
+      <div>
+        <p className="px-3 pb-2 text-xs font-medium text-navy-foreground/70">Sandbox tools</p>
+        <ul className="space-y-1">{sandboxNav.map(renderLink)}</ul>
+      </div>
+    </nav>
+  );
+}
+
+function StoreFooter() {
+  return (
+    <div className="border-t border-white/10 px-5 py-4 text-sm">
+      <p className="font-medium text-white">Rina Dropship Store</p>
+      <p className="mt-0.5 text-xs text-navy-foreground/80">PayPal Sandbox merchant</p>
+      <p className="mt-3 text-xs leading-relaxed text-navy-foreground/80">
+        The AI drafts. You approve. Nothing reaches PayPal without your sign-off.
+      </p>
+    </div>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // Close the drawer whenever the route changes.
+  useEffect(() => setOpen(false), [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    drawerRef.current?.querySelector<HTMLElement>("a")?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    const toggle = toggleRef.current;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+      toggle?.focus();
+    };
+  }, [open]);
 
   return (
-    <aside className="w-64 border-r border-border bg-card flex flex-col shrink-0">
-      {/* Brand Header */}
-      <div className="h-16 flex items-center gap-2.5 px-6 border-b border-border">
-        <div className="h-9 w-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shadow-sm">
-          <ShieldCheck className="h-5 w-5" />
+    <>
+      {/* Desktop rail */}
+      <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col bg-navy lg:flex">
+        <div className="flex h-16 items-center px-5">
+          <Brand />
         </div>
-        <div>
-          <h1 className="font-bold text-sm tracking-tight text-foreground flex items-center gap-1.5">
-            DisputeDefender
-            <span className="text-[10px] uppercase font-semibold bg-primary/10 text-primary px-1.5 py-0.2 rounded">
-              AI
-            </span>
-          </h1>
-          <p className="text-[11px] text-muted-foreground">PayPal Merchant Copilot</p>
-        </div>
+        <NavList pathname={pathname} />
+        <StoreFooter />
+      </aside>
+
+      {/* Mobile and tablet top bar */}
+      <div className="sticky top-0 z-40 flex h-14 items-center justify-between bg-navy px-2 pl-4 lg:hidden">
+        <Brand />
+        <button
+          ref={toggleRef}
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-expanded={open}
+          aria-controls="mobile-nav"
+          className="flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-navy-raised"
+        >
+          <Menu className="h-5 w-5" aria-hidden="true" />
+          <span className="sr-only">Open menu</span>
+        </button>
       </div>
 
-      {/* Nav Links */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {navigation.map((item) => {
-          const isActive =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
-
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-colors",
-                isActive
-                  ? "bg-primary text-primary-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              <span>{item.name}</span>
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Footer Info */}
-      <div className="p-4 border-t border-border bg-muted/30">
-        <div className="rounded-md border border-border bg-background p-3 text-xs">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-medium text-foreground">Rule Engine Active</span>
+      {open && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+          <div className="absolute inset-0 bg-navy/50" aria-hidden="true" onClick={() => setOpen(false)} />
+          <div
+            id="mobile-nav"
+            ref={drawerRef}
+            className="absolute inset-y-0 left-0 flex w-[min(18rem,85vw)] flex-col bg-navy shadow-[8px_0_32px_-8px_hsl(var(--navy)/0.5)]"
+          >
+            <div className="flex h-14 items-center justify-between px-2 pl-4">
+              <Brand />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-navy-raised"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+                <span className="sr-only">Close menu</span>
+              </button>
+            </div>
+            <NavList pathname={pathname} onNavigate={() => setOpen(false)} />
+            <StoreFooter />
           </div>
-          <p className="text-[11px] text-muted-foreground leading-normal">
-            Every claim grounded in verified facts. Autonomous write ops blocked.
-          </p>
         </div>
-      </div>
-    </aside>
+      )}
+    </>
   );
 }

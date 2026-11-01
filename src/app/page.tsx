@@ -1,25 +1,83 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { disputes, analyses } from "@/lib/db/schema";
+import { disputes, analyses, orders } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { formatMoney } from "@/lib/money";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { getDeadlineStatus } from "@/lib/deadline";
+import { isClosed, nextStep, reasonLabel } from "@/lib/case-labels";
+import { buttonVariants } from "@/components/ui/button";
 import { DashboardCharts } from "@/components/dashboard-charts";
-import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  DollarSign,
-  Inbox,
-  Shield,
-  ShoppingBag,
-  SlidersHorizontal,
-} from "lucide-react";
+import { DeadlinePill, PageHeader, RecommendationBadge } from "@/components/case-status";
+import { ArrowRight, ChevronRight, Inbox } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+
+const HOW_IT_WORKS = [
+  { title: "Dispute arrives", body: "PayPal's webhook brings the dispute in. Your order records become a fact base." },
+  { title: "You get a recommendation", body: "Fight, refund, or accept, with the expected cost of each. The math is code, not AI." },
+  { title: "AI drafts the evidence", body: "Every sentence cites a fact. Unsupported claims block approval." },
+  { title: "You approve and send", body: "Only your sign-off sends evidence, refunds, or accepts the claim." },
+];
+
+type OverviewRow = {
+  paypalDisputeId: string;
+  reason: string;
+  amountMinor: number;
+  currency: string;
+  caseState: string;
+  sellerResponseDueAt: string | null;
+  recommendation: string | null;
+  buyerName: string | null;
+};
+
+const byDeadline = (a: OverviewRow, b: OverviewRow) =>
+  (a.sellerResponseDueAt ?? "9999").localeCompare(b.sellerResponseDueAt ?? "9999");
+
+function CaseList({ rows, now, quiet }: { rows: OverviewRow[]; now: number; quiet?: boolean }) {
+  return (
+    <ul className={cn("divide-y overflow-hidden rounded-xl border", quiet ? "bg-card/60" : "bg-card")}>
+      {rows.map((d) => {
+        const step = nextStep(d.caseState, d.recommendation);
+        return (
+          <li key={d.paypalDisputeId}>
+            <Link
+              href={`/cases/${d.paypalDisputeId}`}
+              className="group grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 px-4 py-4 transition-colors hover:bg-accent/60 sm:px-5 md:grid-cols-[minmax(0,1.5fr)_6.5rem_10.5rem_minmax(0,1fr)_minmax(0,1.3fr)_1.25rem]"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium text-foreground">{reasonLabel(d.reason)}</p>
+                <p className="truncate text-sm text-muted-foreground">
+                  <span className="font-mono text-xs">{d.paypalDisputeId}</span>
+                  {d.buyerName && <> · {d.buyerName}</>}
+                </p>
+              </div>
+              <p className="text-right font-semibold tabular-nums text-foreground md:text-left">
+                {formatMoney(d.amountMinor, d.currency)}
+              </p>
+              <div className="col-span-2 flex flex-wrap items-center gap-2 md:contents">
+                <DeadlinePill dueAt={d.sellerResponseDueAt} now={now} className="md:justify-self-start" />
+                <RecommendationBadge recommendation={d.recommendation} />
+                <p
+                  className={cn(
+                    "text-sm max-md:ml-auto",
+                    step.actionable ? "font-semibold text-foreground" : "text-muted-foreground"
+                  )}
+                >
+                  {step.label}
+                </p>
+              </div>
+              <ChevronRight
+                className="hidden h-5 w-5 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5 md:block"
+                aria-hidden="true"
+              />
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export default async function DashboardPage() {
   const allDisputes = await db
@@ -34,237 +92,114 @@ export default async function DashboardPage() {
       sellerResponseDueAt: disputes.sellerResponseDueAt,
       createdAt: disputes.createdAt,
       recommendation: analyses.recommendation,
+      strengthScore: analyses.strengthScore,
+      buyerName: orders.buyerName,
     })
     .from(disputes)
     .leftJoin(analyses, eq(disputes.paypalDisputeId, analyses.disputeId))
+    .leftJoin(orders, eq(disputes.orderId, orders.id))
     .orderBy(desc(disputes.createdAt));
 
-  const now = new Date().getTime();
-  const openCases = allDisputes.filter(
-    (d) => !["RESOLVED", "ACCEPTED", "REFUNDED", "EXPIRED"].includes(d.caseState)
-  );
-
+  const now = Date.now();
+  const openCases = allDisputes.filter((d) => !isClosed(d.caseState));
   const totalAtRiskMinor = openCases.reduce((sum, d) => sum + d.amountMinor, 0);
 
-  const dueWithin48h = openCases.filter((d) => {
+  // The merchant's move first; cases still being analyzed or with PayPal are listed separately.
+  const needsDecision = openCases.filter((d) => nextStep(d.caseState, d.recommendation).actionable).sort(byDeadline);
+  const inProgress = openCases.filter((d) => !nextStep(d.caseState, d.recommendation).actionable).sort(byDeadline);
+
+  const dueSoon = openCases.filter((d) => {
     if (!d.sellerResponseDueAt) return false;
-    const dueTime = new Date(d.sellerResponseDueAt).getTime();
-    const diffHours = (dueTime - now) / (1000 * 60 * 60);
-    return diffHours > 0 && diffHours <= 48;
-  });
+    const urgency = getDeadlineStatus(d.sellerResponseDueAt, now).urgency;
+    return urgency === "urgent" || urgency === "critical";
+  }).length;
+
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  // Seed data is USD-only; the total assumes a single currency.
+  const summary =
+    openCases.length === 0
+      ? "No open disputes. Nothing is on hold."
+      : `${plural(openCases.length, "open dispute", "open disputes")}, ${formatMoney(totalAtRiskMinor, "USD")} on hold by PayPal. ` +
+        (needsDecision.length > 0
+          ? `${plural(needsDecision.length, "needs", "need")} your decision`
+          : "None need your decision yet") +
+        (dueSoon > 0 ? `, and ${plural(dueSoon, "is", "are")} due within 48 hours.` : ".");
 
   return (
-    <div className="space-y-8">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground">
-            Dispute Defense Dashboard
+    <div className="space-y-10">
+      <PageHeader
+        title="Overview"
+        description={summary}
+        actions={
+          <Link href="/cases" className={buttonVariants()}>
+            <Inbox className="h-4 w-4" aria-hidden="true" />
+            Open dispute queue
+          </Link>
+        }
+      />
+
+      <section aria-labelledby="needs-decision" className="space-y-3">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 id="needs-decision" className="text-lg font-semibold text-foreground">
+            Needs your decision
           </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Automated fact collection, grounding validation, and PayPal dispute management.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/demo-shop">
-            <Button variant="outline" size="sm" className="gap-2">
-              <ShoppingBag className="h-4 w-4" />
-              Demo Storefront
-            </Button>
-          </Link>
-          <Link href="/cases">
-            <Button size="sm" className="gap-2">
-              <Inbox className="h-4 w-4" />
-              Open Case Queue
-            </Button>
+          <Link href="/cases" className="flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+            All disputes <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
         </div>
-      </div>
 
-      {/* KPI Summary Tiles */}
-      <div className="grid gap-4 md:grid-cols-3">
-        {/* Open Cases */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Active Disputes
-            </CardTitle>
-            <Inbox className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{openCases.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {allDisputes.length} total cases recorded in sandbox
+        {needsDecision.length === 0 ? (
+          <div className="rounded-xl border border-dashed bg-card px-6 py-10 text-center">
+            <p className="font-medium text-foreground">Nothing needs you right now</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+              Disputes show up here once there is a recommendation or draft to review. To try the flow, open one in
+              the{" "}
+              <Link href="/admin/simulate" className="font-medium text-primary hover:underline">
+                Simulator
+              </Link>
+              .
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        ) : (
+          <CaseList rows={needsDecision} now={now} />
+        )}
+      </section>
 
-        {/* Capital At Risk */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Disputed Capital At Risk
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-emerald-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-foreground">
-              {formatMoney(totalAtRiskMinor, "USD")}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Held funds pending response submission
-            </p>
-          </CardContent>
-        </Card>
+      {inProgress.length > 0 && (
+        <section aria-labelledby="in-progress" className="space-y-3">
+          <div>
+            <h2 id="in-progress" className="text-base font-semibold text-foreground">
+              Being prepared or with PayPal
+            </h2>
+            <p className="text-sm text-muted-foreground">No action from you yet. Deadlines still apply.</p>
+          </div>
+          <CaseList rows={inProgress} now={now} quiet />
+        </section>
+      )}
 
-        {/* Due Within 48h */}
-        <Card className={dueWithin48h.length > 0 ? "border-amber-200 bg-amber-50/20" : ""}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Urgent Response Required
-            </CardTitle>
-            <Clock className={`h-4 w-4 ${dueWithin48h.length > 0 ? "text-amber-600" : "text-muted-foreground"}`} />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-3xl font-bold ${dueWithin48h.length > 0 ? "text-amber-700" : ""}`}>
-              {dueWithin48h.length}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              PayPal deadline expires within 48 hours
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* AG Charts Dashboard Analytics */}
       <DashboardCharts cases={allDisputes} />
 
-      {/* Quick Access & Recent Cases */}
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* Left 2 Cols: Recent Disputes Preview */}
-        <div className="md:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-sm text-foreground">Recent Disputes Requiring Attention</h3>
-            <Link href="/cases" className="text-xs text-primary hover:underline flex items-center gap-1">
-              View full AG Grid queue <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div className="rounded-lg border bg-card overflow-hidden">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-muted/50 border-b text-muted-foreground font-medium">
-                <tr>
-                  <th className="py-2.5 px-4">Dispute ID</th>
-                  <th className="py-2.5 px-4">Reason</th>
-                  <th className="py-2.5 px-4">Amount</th>
-                  <th className="py-2.5 px-4">State</th>
-                  <th className="py-2.5 px-4">Recommendation</th>
-                  <th className="py-2.5 px-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {allDisputes.slice(0, 5).map((d) => (
-                  <tr key={d.paypalDisputeId} className="hover:bg-muted/30 transition-colors">
-                    <td className="py-3 px-4 font-mono font-medium text-foreground">
-                      <Link href={`/cases/${d.paypalDisputeId}`} className="hover:text-primary hover:underline">
-                        {d.paypalDisputeId}
-                      </Link>
-                    </td>
-                    <td className="py-3 px-4 max-w-[180px] truncate">
-                      {d.reason.replace(/MERCHANDISE_OR_SERVICE_/g, "")}
-                    </td>
-                    <td className="py-3 px-4 font-medium">
-                      {formatMoney(d.amountMinor, d.currency)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <Badge variant="outline" className="text-[10px]">
-                        {d.caseState}
-                      </Badge>
-                    </td>
-                    <td className="py-3 px-4">
-                      {d.recommendation === "FIGHT" && (
-                        <Badge variant="success" className="text-[10px]">FIGHT</Badge>
-                      )}
-                      {d.recommendation === "REFUND" && (
-                        <Badge variant="warning" className="text-[10px]">REFUND</Badge>
-                      )}
-                      {d.recommendation === "ACCEPT" && (
-                        <Badge variant="destructive" className="text-[10px]">ACCEPT</Badge>
-                      )}
-                      {!d.recommendation && (
-                        <span className="text-muted-foreground text-[11px]">—</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <Link href={`/cases/${d.paypalDisputeId}`}>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">
-                          Inspect
-                        </Button>
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Right Col: System Safeguards & Demo Hub */}
-        <div className="space-y-4">
-          <h3 className="font-semibold text-sm text-foreground">Governance & Safeguards</h3>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Shield className="h-4 w-4 text-primary" />
-                Guaranteed Boundaries
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-xs text-muted-foreground">
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Strict Grounding:</strong> AI drafts cite fact IDs. Hallucinated tracking numbers or dates are deterministically rejected.
-                </span>
+      <section aria-labelledby="how-it-works" className="space-y-4 border-t pt-8">
+        <h2 id="how-it-works" className="text-lg font-semibold text-foreground">
+          How a dispute moves through DisputeDefender
+        </h2>
+        <ol className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {HOW_IT_WORKS.map((step, i) => (
+            <li key={step.title} className="flex gap-3">
+              <span
+                aria-hidden="true"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-navy text-[13px] font-semibold text-white"
+              >
+                {i + 1}
+              </span>
+              <div>
+                <p className="font-medium text-foreground">{step.title}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{step.body}</p>
               </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Human Gatekeeper:</strong> Evidence submission or refunds require explicit merchant click.
-                </span>
-              </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Deterministic EV:</strong> Cost formulas are computed in integer cents by code, not LLMs.
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-muted/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">
-                Developer Sandbox Tools
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Link href="/admin/simulate" className="block">
-                <Button variant="outline" size="sm" className="w-full justify-start gap-2 text-xs">
-                  <SlidersHorizontal className="h-3.5 w-3.5" />
-                  Dispute Simulator & Adjudication
-                </Button>
-              </Link>
-              <Link href="/demo-shop" className="block">
-                <Button variant="outline" size="sm" className="w-full justify-start gap-2 text-xs">
-                  <ShoppingBag className="h-3.5 w-3.5" />
-                  Sandbox Checkout Store
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </li>
+          ))}
+        </ol>
+      </section>
     </div>
   );
 }

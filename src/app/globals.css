@@ -2,67 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Light only: merchants work this queue at a desk in daylight, and the demo is recorded as a screen video.
+ * Palette follows PayPal's merchant tools: deep navy shell, PayPal blue for actions and selection only.
+ */
 @layer base {
   :root {
-    --background: 220 20% 97%;
-    --foreground: 224 71.4% 4.1%;
+    --background: 216 33% 97%;
+    --foreground: 220 65% 13%;
 
     --card: 0 0% 100%;
-    --card-foreground: 224 71.4% 4.1%;
+    --card-foreground: 220 65% 13%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 224 71.4% 4.1%;
+    --popover-foreground: 220 65% 13%;
 
-    --primary: 212 100% 45%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 210 100% 44%;
+    --primary-hover: 212 100% 36%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 215 25% 93%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --navy: 224 100% 20%;
+    --navy-raised: 224 70% 27%;
+    --navy-foreground: 214 60% 92%;
 
-    --muted: 215 25% 93%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --secondary: 214 40% 95%;
+    --secondary-foreground: 220 65% 13%;
 
-    --accent: 215 25% 90%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --muted: 214 33% 95%;
+    --muted-foreground: 218 19% 40%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --accent: 214 85% 96%;
+    --accent-foreground: 212 100% 30%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 212 100% 45%;
+    --destructive: 5 75% 44%;
+    --destructive-soft: 5 85% 96%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 154 78% 26%;
+    --success-soft: 150 60% 94%;
+
+    --warning: 30 100% 32%;
+    --warning-soft: 38 100% 93%;
+
+    --border: 216 27% 89%;
+    --input: 216 22% 80%;
+    --ring: 210 100% 44%;
 
     --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 224 71.4% 4.1%;
-    --foreground: 210 40% 98%;
-
-    --card: 224 71.4% 4.1%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 224 71.4% 4.1%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 212 100% 50%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.8 100% 50%;
   }
 }
 
@@ -70,20 +56,43 @@
   * {
     @apply border-border;
   }
+  html {
+    scrollbar-color: hsl(var(--input)) transparent;
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+    color: hsl(var(--foreground));
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  a {
+    text-underline-offset: 3px;
+  }
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }
 
-/* Case queue: urgency is shown as text in the deadline cell; the row edge repeats it for scanning. */
-@layer components {
-  .row-urgency-expired .ag-cell[col-id="paypalDisputeId"] {
-    box-shadow: inset 3px 0 0 hsl(var(--destructive));
-  }
-  .row-urgency-critical .ag-cell[col-id="paypalDisputeId"] {
-    box-shadow: inset 3px 0 0 rgb(220 38 38);
-  }
-  .row-urgency-urgent .ag-cell[col-id="paypalDisputeId"] {
-    box-shadow: inset 3px 0 0 rgb(217 119 6);
+/* AG Grid autoHeight reserves overlay space under short lists; the queue renders its own empty state. */
+.queue-grid .ag-grid-scrolling-rows.ag-layout-auto-height {
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

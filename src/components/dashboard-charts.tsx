@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AgCharts } from "ag-charts-react";
 import { AllCommunityModule, ModuleRegistry } from "ag-charts-community";
-import type { AgChartOptions } from "ag-charts-community";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { BarChart3, PieChart } from "lucide-react";
+import type { AgBarSeriesTooltipRendererParams, AgChartOptions, AgChartTheme } from "ag-charts-community";
+import { formatMoney } from "@/lib/money";
+import { caseStateMeta } from "@/lib/case-labels";
 
 // AG Charts v13+ is modular: series types must be registered before first render.
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -18,114 +18,155 @@ export interface DashboardCaseItem {
   paypalStatus: string;
 }
 
+const NAVY = "#001c64";
+const BLUE = "#0070e0";
+const INK = "#0b1d3f";
+const MUTED = "#55657f";
+const GRID = "#e3e8ef";
+
+function buildTheme(fontFamily: string): AgChartTheme {
+  return {
+    baseTheme: "ag-default",
+    params: {
+      fontFamily,
+      fontSize: 13,
+      textColor: INK,
+      subtleTextColor: MUTED,
+      backgroundColor: "transparent",
+    },
+    overrides: {
+      common: {
+        axes: {
+          number: { gridLine: { style: [{ stroke: GRID, lineDash: [] }] }, label: { color: MUTED } },
+          category: { label: { color: INK }, line: { stroke: GRID } },
+        },
+      },
+    },
+  };
+}
+
+const OPEN_STATES = ["NEW", "ANALYZED", "DRAFTED", "APPROVED", "SUBMITTED"];
+
+interface BarDatum {
+  label: string;
+  value: number;
+}
+
+// Outcome buckets with fixed colours so the same outcome reads the same everywhere.
+const OUTCOMES: Array<{ label: string; states: string[]; fill: string }> = [
+  { label: "Open", states: ["NEW", "ANALYZED", "DRAFTED", "APPROVED", "NEEDS_ATTENTION"], fill: BLUE },
+  { label: "With PayPal", states: ["SUBMITTED"], fill: "#7aa7e6" },
+  { label: "Resolved", states: ["RESOLVED"], fill: "#0f7a4c" },
+  { label: "Refunded", states: ["REFUNDED"], fill: "#b86e00" },
+  { label: "Claim accepted", states: ["ACCEPTED"], fill: NAVY },
+  { label: "Expired", states: ["EXPIRED"], fill: "#c0392b" },
+];
+
 export function DashboardCharts({ cases }: { cases: DashboardCaseItem[] }) {
-  const riskByStateOptions = useMemo<AgChartOptions>(() => {
-    const stateAmounts: Record<string, number> = {
-      NEW: 0,
-      ANALYZED: 0,
-      DRAFTED: 0,
-      APPROVED: 0,
-      SUBMITTED: 0,
-    };
+  const currency = cases[0]?.currency ?? "USD";
 
+  // Canvas text cannot resolve CSS variables, so read the loaded font family from the page.
+  const [fontFamily, setFontFamily] = useState("ui-sans-serif, system-ui, sans-serif");
+  useEffect(() => setFontFamily(getComputedStyle(document.body).fontFamily), []);
+  const chartTheme = useMemo(() => buildTheme(fontFamily), [fontFamily]);
+
+  const onHoldOptions = useMemo<AgChartOptions>(() => {
+    // Sum in integer minor units; only the axis and tooltip format them as money.
+    const totals = new Map<string, number>(OPEN_STATES.map((s) => [s, 0]));
     for (const c of cases) {
-      if (stateAmounts[c.caseState] !== undefined) {
-        stateAmounts[c.caseState] += c.amountMinor / 100;
-      }
+      if (totals.has(c.caseState)) totals.set(c.caseState, (totals.get(c.caseState) ?? 0) + c.amountMinor);
     }
-
-    const data = Object.entries(stateAmounts).map(([state, amount]) => ({
-      state,
-      amount: Number(amount.toFixed(2)),
+    const data: BarDatum[] = OPEN_STATES.map((state) => ({
+      label: caseStateMeta(state).label,
+      value: totals.get(state) ?? 0,
     }));
 
     return {
+      theme: chartTheme,
       data,
       series: [
         {
           type: "bar" as const,
-          xKey: "state",
-          yKey: "amount",
-          yName: "Amount ($)",
-        },
-      ],
-    };
-  }, [cases]);
-
-  const outcomesOptions = useMemo<AgChartOptions>(() => {
-    const outcomeCounts: Record<string, number> = {};
-
-    for (const c of cases) {
-      let label: string;
-      if (c.caseState === "RESOLVED") {
-        label = "Resolved (PayPal)";
-      } else if (c.caseState === "ACCEPTED") {
-        label = "Accepted Claim";
-      } else if (c.caseState === "REFUNDED") {
-        label = "Merchant Refunded";
-      } else if (c.caseState === "EXPIRED") {
-        label = "Deadline Expired";
-      } else if (c.caseState === "SUBMITTED") {
-        label = "Under Review";
-      } else {
-        label = "In Progress";
-      }
-      outcomeCounts[label] = (outcomeCounts[label] || 0) + 1;
-    }
-
-    const data = Object.entries(outcomeCounts).map(([status, count]) => ({
-      status,
-      count,
-    }));
-
-    return {
-      data,
-      theme: "ag-default",
-      series: [
-        {
-          type: "donut" as const,
-          calloutLabelKey: "status",
-          angleKey: "count",
-          innerRadiusRatio: 0.55,
-          sectorLabel: {
-            formatter: (params) => `${params.value}`,
+          direction: "horizontal" as const,
+          xKey: "label",
+          yKey: "value",
+          yName: "On hold",
+          fill: BLUE,
+          cornerRadius: 4,
+          tooltip: {
+            renderer: ({ datum }: AgBarSeriesTooltipRendererParams<BarDatum>) => ({
+              heading: datum.label,
+              data: [{ label: "On hold", value: formatMoney(datum.value, currency) }],
+            }),
           },
         },
       ],
+      axes: {
+        x: { type: "category" as const, position: "left" as const },
+        y: {
+          type: "number" as const,
+          position: "bottom" as const,
+          label: { formatter: ({ value }) => formatMoney(Math.round(Number(value)), currency).replace(/\.00$/, "") },
+        },
+      },
     };
-  }, [cases]);
+  }, [cases, currency, chartTheme]);
+
+  // With a single outcome the chart repeats the summary sentence, so it is left out.
+  const outcomeCount = OUTCOMES.filter((o) => cases.some((c) => o.states.includes(c.caseState))).length;
+  const showOutcomes = outcomeCount > 1;
+
+  const outcomesOptions = useMemo<AgChartOptions>(() => {
+    const data = OUTCOMES.map((o) => ({
+      label: o.label,
+      value: cases.filter((c) => o.states.includes(c.caseState)).length,
+      fill: o.fill,
+    }));
+
+    return {
+      theme: chartTheme,
+      data,
+      series: [
+        {
+          type: "bar" as const,
+          direction: "horizontal" as const,
+          xKey: "label",
+          yKey: "value",
+          yName: "Disputes",
+          cornerRadius: 4,
+          itemStyler: ({ datum }: { datum: { fill: string } }) => ({ fill: datum.fill }),
+        },
+      ],
+      axes: {
+        x: { type: "category" as const, position: "left" as const },
+        y: { type: "number" as const, position: "bottom" as const, interval: { step: 1 } },
+      },
+    };
+  }, [cases, chartTheme]);
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      {/* Chart 1: Capital at risk by state */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-primary" />
-            Open Capital at Risk by Case State
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[280px] w-full">
-            <AgCharts options={riskByStateOptions} />
-          </div>
-        </CardContent>
-      </Card>
+    <section aria-label="Charts" className={showOutcomes ? "grid gap-6 lg:grid-cols-2" : "grid gap-6"}>
+      <figure className="rounded-xl border bg-card p-5">
+        <figcaption>
+          <h2 className="text-base font-semibold text-foreground">Money on hold, by stage</h2>
+          <p className="text-sm text-muted-foreground">Amounts PayPal holds while each open dispute is decided.</p>
+        </figcaption>
+        <div className="mt-4 h-[240px] w-full">
+          <AgCharts options={onHoldOptions} />
+        </div>
+      </figure>
 
-      {/* Chart 2: Resolution & Lifecycle Breakdown */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <PieChart className="h-4 w-4 text-primary" />
-            Dispute Lifecycle & Resolution Outcomes
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[280px] w-full">
+      {showOutcomes && (
+        <figure className="rounded-xl border bg-card p-5">
+          <figcaption>
+            <h2 className="text-base font-semibold text-foreground">Outcomes</h2>
+            <p className="text-sm text-muted-foreground">All {cases.length} disputes recorded in the sandbox.</p>
+          </figcaption>
+          <div className="mt-4 h-[240px] w-full">
             <AgCharts options={outcomesOptions} />
           </div>
-        </CardContent>
-      </Card>
-    </div>
+        </figure>
+      )}
+    </section>
   );
 }
