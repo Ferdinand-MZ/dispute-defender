@@ -66,8 +66,9 @@ function DialogContent({ onClose, children }: { onClose: () => void; children: R
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" onClick={onClose} />
+    // Bottom sheet on phones (thumb reach), centered dialog from sm up.
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+      <div className="fixed inset-0 bg-navy/50" aria-hidden="true" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
@@ -76,12 +77,12 @@ function DialogContent({ onClose, children }: { onClose: () => void; children: R
         aria-describedby={descriptionId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="relative z-50 w-full max-w-lg rounded-xl border bg-background p-6 shadow-2xl focus:outline-none"
+        className="relative z-50 max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl border bg-card p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-[0_12px_40px_-8px_hsl(var(--navy)/0.35)] focus:outline-none sm:max-w-lg sm:rounded-2xl sm:p-6"
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <X className="h-4 w-4" aria-hidden="true" />
           <span className="sr-only">Close</span>
@@ -98,7 +99,7 @@ export function DialogHeader({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col space-y-1.5 text-center sm:text-left mb-4", className)}
+      className={cn("mb-4 flex flex-col gap-1.5 pr-10 text-left", className)}
       {...props}
     />
   );
@@ -110,7 +111,7 @@ export function DialogFooter({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 mt-6", className)}
+      className={cn("mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
       {...props}
     />
   );
@@ -124,7 +125,7 @@ export function DialogTitle({
   return (
     <h2
       id={ids?.titleId}
-      className={cn("text-lg font-semibold leading-none tracking-tight", className)}
+      className={cn("text-lg font-semibold leading-snug text-foreground", className)}
       {...props}
     />
   );
@@ -138,7 +139,7 @@ export function DialogDescription({
   return (
     <p
       id={ids?.descriptionId}
-      className={cn("text-sm text-muted-foreground mt-1", className)}
+      className={cn("text-sm text-muted-foreground", className)}
       {...props}
     />
   );
