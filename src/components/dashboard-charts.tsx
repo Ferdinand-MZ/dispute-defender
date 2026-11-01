@@ -2,9 +2,13 @@
 
 import { useMemo } from "react";
 import { AgCharts } from "ag-charts-react";
+import { AllCommunityModule, ModuleRegistry } from "ag-charts-community";
 import type { AgChartOptions } from "ag-charts-community";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { BarChart3, PieChart } from "lucide-react";
+
+// AG Charts v13+ is modular: series types must be registered before first render.
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 export interface DashboardCaseItem {
   paypalDisputeId: string;

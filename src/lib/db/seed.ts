@@ -1,4 +1,5 @@
-import { db } from "./index";
+// ./schema must load before ./index: getDb() auto-seeds while ./index is still loading,
+// so it passes its instance explicitly instead of relying on the circular import.
 import {
   policies,
   orders,
@@ -11,8 +12,9 @@ import {
   webhookEvents,
   actions,
 } from "./schema";
+import { db as defaultDb } from "./index";
 
-export async function seed() {
+export async function seed(db = defaultDb) {
   console.log("🌱 Seeding DisputeDefender database...");
 
   // 1. Store Policies

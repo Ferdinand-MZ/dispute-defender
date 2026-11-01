@@ -37,7 +37,9 @@ export function getDb() {
       const row = _sqlite.prepare("SELECT count(*) as cnt FROM disputes").get() as { cnt: number } | undefined;
       if (!row || row.cnt === 0) {
         const { seed } = require("./seed");
-        seed();
+        seed(_db).catch((seedErr: unknown) => {
+          console.warn("[DEMO_MODE_RESEED_WARNING] Could not auto-seed demo data:", seedErr);
+        });
       }
     } catch (seedErr) {
       console.warn("[DEMO_MODE_RESEED_WARNING] Could not auto-seed demo data:", seedErr);
