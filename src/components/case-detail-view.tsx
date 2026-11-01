@@ -5,7 +5,6 @@ import Link from "next/link";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogHeader,
@@ -16,26 +15,29 @@ import {
 import {
   ArrowLeft,
   Bot,
-  CheckCircle,
-  Clock,
-  ExternalLink,
-  FileCheck,
-  FileText,
+  Check,
+  CircleAlert,
   Loader2,
-  Lock,
-  Package,
   RotateCcw,
   Send,
-  Shield,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Truck,
-  User,
-  XCircle,
+  X,
 } from "lucide-react";
 import type { Dispute, Order, Fact, Analysis, Draft, Action, AuditLogEntry } from "@/lib/db/schema";
 import type { GroundingError } from "@/lib/agent/grounding";
+import { CaseStateBadge, DeadlinePill } from "@/components/case-status";
+import {
+  caseStateMeta,
+  humanizeEnum,
+  isClosed,
+  lifecycleSteps,
+  reasonLabel,
+  recommendationMeta,
+  winBandLabel,
+} from "@/lib/case-labels";
+import { cn } from "@/lib/utils";
 
 // Fixed locale and UTC so server and browser render identical text (no hydration mismatch).
 const dateTimeFormat = new Intl.DateTimeFormat("en-US", {
@@ -47,11 +49,14 @@ function formatUtc(iso: string): string {
   return `${dateTimeFormat.format(new Date(iso))} UTC`;
 }
 
-const recommendationVariant: Record<string, "success" | "warning" | "destructive"> = {
-  FIGHT: "success",
-  REFUND: "warning",
-  ACCEPT: "destructive",
+const ACTOR_LABELS: Record<string, string> = {
+  human: "You",
+  agent: "AI agent",
+  paypal: "PayPal",
+  system: "System",
 };
+
+const DEFAULT_APPROVER = "Rina (store owner)";
 
 interface CaseDetailViewProps {
   dispute: Dispute;
@@ -63,20 +68,78 @@ interface CaseDetailViewProps {
   auditLog: AuditLogEntry[];
 }
 
+function Section({
+  title,
+  description,
+  aside,
+  children,
+  className,
+  id,
+}: {
+  title: string;
+  description?: React.ReactNode;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  id?: string;
+}) {
+  return (
+    <section id={id} aria-label={title} className={cn("rounded-xl border bg-card", className)}>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-5 pt-5">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-foreground">{title}</h2>
+          {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+        </div>
+        {aside}
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function SignerField({ value, onChange, id }: { value: string; onChange: (v: string) => void; id: string }) {
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-sm font-medium text-foreground">
+        Signed by
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Your name and role"
+        autoComplete="name"
+        className="h-11 w-full rounded-lg border border-input bg-card px-3 text-base text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:text-sm"
+      />
+      <p className="text-xs text-muted-foreground">Recorded in the audit log with this action.</p>
+    </div>
+  );
+}
+
+function ErrorNote({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <p role="alert" className="flex items-start gap-2 rounded-lg bg-destructive-soft p-3 text-sm text-destructive">
+      <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      {message}
+    </p>
+  );
+}
+
 export function CaseDetailView({
   dispute,
   order,
   facts,
   analysis,
   draft,
-  actions,
   auditLog: initialAuditLog,
 }: CaseDetailViewProps) {
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [caseState, setCaseState] = useState<string>(dispute.caseState);
   const [auditLogList, setAuditLogList] = useState<AuditLogEntry[]>(initialAuditLog);
-  const [approverName, setApproverName] = useState("Sarah Jenkins (Merchant Admin)");
+  const [approverName, setApproverName] = useState(DEFAULT_APPROVER);
 
   // Submission state
   const [submittingEvidence, setSubmittingEvidence] = useState(false);
@@ -119,11 +182,6 @@ export function CaseDetailView({
     }
   }
 
-  const showFact = (factId: string) => {
-    setSelectedFactId(factId);
-    document.getElementById(`fact-${factId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  };
-
   let groundingErrors: GroundingError[] = [];
   if (draft?.groundingErrorsJson) {
     try {
@@ -134,13 +192,21 @@ export function CaseDetailView({
   }
 
   const groundingPassed = draft?.groundingStatus === "pass" || draft?.groundingStatus === "edited_pass";
-  const citedFactIds = Array.from(
-    new Set(
-      parsedDraftBody?.sections?.flatMap((section) => section.paragraphs.flatMap((p) => p.claimRefs)) ?? []
-    )
-  );
+  const allClaimRefs = parsedDraftBody?.sections?.flatMap((section) => section.paragraphs.flatMap((p) => p.claimRefs)) ?? [];
+  const citedFactIds = Array.from(new Set(allClaimRefs));
+  const citationCounts = allClaimRefs.reduce<Record<string, number>>((acc, ref) => {
+    acc[ref] = (acc[ref] ?? 0) + 1;
+    return acc;
+  }, {});
   const paragraphCount =
     parsedDraftBody?.sections?.reduce((count, section) => count + section.paragraphs.length, 0) ?? 0;
+
+  // Two-way citation link: a chip jumps to its fact, a fact lights up every paragraph that cites it.
+  const showFact = (factId: string) => {
+    setSelectedFactId(factId);
+    document.getElementById(`fact-${factId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const toggleFact = (factId: string) => setSelectedFactId((current) => (current === factId ? null : factId));
 
   async function handleApproveAndSubmit() {
     if (!approverName.trim()) {
@@ -326,715 +392,694 @@ export function CaseDetailView({
     }
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Top Breadcrumb & Status Bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/cases">
-            <Button variant="ghost" size="sm" className="gap-1.5 text-xs">
-              <ArrowLeft className="h-4 w-4" />
-              Back to Queue
-            </Button>
-          </Link>
-          <div className="h-4 w-px bg-border" />
-          <h2 className="text-xl font-bold font-mono tracking-tight text-foreground">
-            {dispute.paypalDisputeId}
-          </h2>
-          <Badge variant="outline" className="font-mono text-xs">
-            {dispute.reason.replace(/MERCHANDISE_OR_SERVICE_/g, "")}
-          </Badge>
-          <Badge
-            variant={
-              caseState === "APPROVED" || caseState === "RESOLVED" || caseState === "SUBMITTED"
-                ? "success"
-                : caseState === "REFUNDED"
-                ? "warning"
-                : "secondary"
-            }
-            className="font-mono text-xs uppercase"
+  // Which actions are open in the current state (same rules as before the redesign).
+  const closed = isClosed(caseState);
+  const canApprove = !!draft && groundingPassed && !["SUBMITTED", "RESOLVED", "REFUNDED", "ACCEPTED"].includes(caseState);
+  const canRefund = !["REFUNDED", "ACCEPTED", "RESOLVED"].includes(caseState);
+  const canAccept = !["ACCEPTED", "REFUNDED", "RESOLVED"].includes(caseState);
+  const recommendation = analysis?.recommendation ?? null;
+  const recMeta = recommendation ? recommendationMeta(recommendation) : null;
+  const amount = formatMoney(dispute.amountMinor, dispute.currency);
+
+  // The primary action follows the recommendation; the other options stay one tap away.
+  type ActionKey = "approve" | "refund" | "accept";
+  const primaryAction: ActionKey | null =
+    closed || caseState === "SUBMITTED"
+      ? null
+      : recommendation === "REFUND" && canRefund
+        ? "refund"
+        : recommendation === "ACCEPT" && canAccept
+          ? "accept"
+          : "approve";
+
+  const actionConfig: Record<ActionKey, { label: string; icon: typeof Send; open: () => void; enabled: boolean }> = {
+    approve: { label: "Review and send evidence", icon: Send, open: () => setShowApprovalModal(true), enabled: canApprove },
+    refund: { label: `Refund ${amount}`, icon: RotateCcw, open: () => setShowRefundModal(true), enabled: canRefund },
+    accept: { label: "Accept the claim", icon: X, open: () => setShowAcceptModal(true), enabled: canAccept },
+  };
+  const secondaryActions = (["approve", "refund", "accept"] as ActionKey[]).filter(
+    (key) => key !== primaryAction && actionConfig[key].enabled
+  );
+
+  let nextStepTitle: string;
+  let nextStepBody: string;
+  if (caseState === "SUBMITTED") {
+    nextStepTitle = "Evidence sent to PayPal";
+    nextStepBody = "PayPal reviews the evidence and decides. The outcome will show up here.";
+  } else if (closed) {
+    nextStepTitle = `Closed: ${caseStateMeta(caseState).label.toLowerCase()}`;
+    nextStepBody = "Nothing left to do on this dispute.";
+  } else if (primaryAction === "refund") {
+    nextStepTitle = "Refund the buyer";
+    nextStepBody = "Fighting is expected to cost more than refunding. Refunding closes the dispute.";
+  } else if (primaryAction === "accept") {
+    nextStepTitle = "Accept the claim";
+    nextStepBody = "PayPal closes the dispute in the buyer's favor.";
+  } else {
+    nextStepTitle = "Approve the evidence";
+    nextStepBody = "Read the draft below, then sign to send it to PayPal. Nothing is sent without you.";
+  }
+
+  let approveBlocker: string | null = null;
+  if (primaryAction === "approve" && !canApprove) {
+    approveBlocker = !draft
+      ? "The evidence draft isn't ready yet. Approval unlocks when it is."
+      : `Approval is blocked: ${groundingErrors.length || "some"} ${groundingErrors.length === 1 ? "claim isn't" : "claims aren't"} backed by a fact.`;
+  }
+
+  const steps = lifecycleSteps(caseState);
+  const currentStep = steps.findIndex((s) => s.status === "current");
+
+  const fightLoss = analysis?.fightLossMinor ?? 0;
+  const refundLoss = analysis?.refundLossMinor ?? 0;
+  const maxLoss = Math.max(fightLoss, refundLoss, 1);
+  const costRows = [
+    { key: "FIGHT", label: "If you fight", minor: fightLoss, note: "expected loss, incl. fees and effort" },
+    { key: "REFUND", label: "If you refund", minor: refundLoss, note: "the disputed amount" },
+  ];
+
+  const PrimaryIcon = primaryAction ? actionConfig[primaryAction].icon : Send;
+  const showMobileBar = primaryAction !== null;
+
+  // Rendered after the recommendation on small screens and in the sticky side column on desktop.
+  const nextStepPanel = (className: string) => (
+    <section aria-label="Next step" className={cn("rounded-xl border-2 border-navy bg-card p-5", className)}>
+      <h2 className="text-lg font-semibold text-foreground">
+        {primaryAction ? `Next: ${nextStepTitle.charAt(0).toLowerCase()}${nextStepTitle.slice(1)}` : nextStepTitle}
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">{nextStepBody}</p>
+
+      {primaryAction && (
+        <div className="mt-4 space-y-2">
+          <Button
+            size="lg"
+            className="w-full"
+            variant={primaryAction === "approve" ? "default" : "outline"}
+            onClick={actionConfig[primaryAction].open}
+            disabled={!actionConfig[primaryAction].enabled}
           >
-            {caseState}
-          </Badge>
+            <PrimaryIcon className="h-4 w-4" aria-hidden="true" />
+            {actionConfig[primaryAction].label}
+          </Button>
+          {approveBlocker && <p className="text-sm text-destructive">{approveBlocker}</p>}
         </div>
+      )}
+      {caseState === "SUBMITTED" && (
+        <p className="mt-4 flex items-center gap-2 text-sm font-medium text-success">
+          <Check className="h-4 w-4" aria-hidden="true" />
+          Sent with {citedFactIds.length} cited facts
+        </p>
+      )}
 
-        <div className="flex items-center gap-2">
-          {draft && groundingPassed && (
-            <Badge variant="success" className="gap-1 text-xs">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              Grounding passed · {paragraphCount} paragraphs, {citedFactIds.length} facts cited
-            </Badge>
-          )}
-          {draft && draft.groundingStatus === "fail" && (
-            <Badge variant="destructive" className="gap-1 text-xs">
-              <ShieldAlert className="h-3.5 w-3.5" />
-              Grounding failed · {groundingErrors.length} {groundingErrors.length === 1 ? "issue" : "issues"}
-            </Badge>
-          )}
-          {!draft && (
-            <Badge variant="outline" className="text-xs">
-              No draft yet
-            </Badge>
-          )}
+      {secondaryActions.length > 0 && (
+        <div className="mt-5 border-t pt-4">
+          <p className="text-sm font-medium text-foreground">Other options</p>
+          <div className="mt-2 flex flex-col gap-2">
+            {secondaryActions.map((key) => {
+              const Icon = actionConfig[key].icon;
+              return (
+                <Button key={key} variant="outline" className="w-full justify-start" onClick={actionConfig[key].open}>
+                  <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  {actionConfig[key].label}
+                </Button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
+    </section>
+  );
 
-      {/* 3-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: Dispute Info & Timeline (3 cols) */}
-        <div className="lg:col-span-3 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">
-                Dispute Metadata
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-xs">
-              <div>
-                <span className="text-muted-foreground">Disputed Capital:</span>
-                <p className="text-base font-bold text-foreground">
-                  {formatMoney(dispute.amountMinor, dispute.currency)}
-                </p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">PayPal Status:</span>
-                <p className="font-mono font-medium text-foreground">{dispute.paypalStatus}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Lifecycle Stage:</span>
-                <p className="font-medium text-foreground">{dispute.lifeCycleStage || "INQUIRY"}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Response Deadline:</span>
-                <p className="font-medium text-foreground flex items-center gap-1 mt-0.5">
-                  <Clock className="h-3.5 w-3.5 text-amber-600" />
-                  {dispute.sellerResponseDueAt ? formatUtc(dispute.sellerResponseDueAt) : "No deadline specified"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+  return (
+    <div className={cn("space-y-6", showMobileBar && "pb-24 lg:pb-0")}>
+      {/* Header */}
+      <div className="space-y-5">
+        <Link
+          href="/cases"
+          className="inline-flex min-h-10 items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Dispute queue
+        </Link>
 
-          {/* Linked Order */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xs uppercase text-muted-foreground font-semibold flex items-center gap-1.5">
-                <Package className="h-3.5 w-3.5 text-primary" />
-                Linked Store Order
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 text-xs">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0 space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-[28px] sm:leading-9">
+              {reasonLabel(dispute.reason)}
+            </h1>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+              <CaseStateBadge state={caseState} />
+              <span className="font-mono text-xs">{dispute.paypalDisputeId}</span>
+              <span aria-hidden="true">·</span>
               {order ? (
                 <>
-                  <div>
-                    <span className="text-muted-foreground">Order ID:</span>
-                    <p className="font-mono font-medium text-foreground">{order.id}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Customer:</span>
-                    <p className="font-medium text-foreground">{order.buyerName || "N/A"}</p>
-                    <p className="text-muted-foreground text-[11px]">{order.buyerEmail}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Fulfillment Status:</span>
-                    <Badge variant="outline" className="mt-0.5 uppercase text-[10px]">
-                      {order.status}
-                    </Badge>
-                  </div>
-                  {order.trackingNumber && (
-                    <div>
-                      <span className="text-muted-foreground">Carrier Tracking:</span>
-                      <p className="font-mono text-primary font-medium flex items-center gap-1 mt-0.5">
-                        <Truck className="h-3.5 w-3.5" />
-                        {order.carrier} - {order.trackingNumber}
-                      </p>
-                    </div>
-                  )}
+                  Order <span className="font-mono text-xs">{order.id}</span>
+                  {order.buyerName && <> · {order.buyerName}</>}
                 </>
               ) : (
-                <p className="text-muted-foreground italic">No linked order identified</p>
+                "No linked order"
               )}
-            </CardContent>
-          </Card>
-
-          {/* Audit Timeline */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">
-                Audit Timeline
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-xs">
-              <div className="relative border-l border-border pl-4 space-y-4">
-                {auditLogList.map((log) => (
-                  <div key={log.id} className="relative">
-                    <span className="absolute -left-[21px] top-1 h-2 w-2 rounded-full bg-primary" />
-                    <p className="font-semibold text-foreground">{log.action}</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Actor: <span className="font-mono text-primary">{log.actor}</span> • {formatUtc(log.ts)}
-                    </p>
-                  </div>
-                ))}
+              {" · "}PayPal: {humanizeEnum(dispute.paypalStatus)}
+            </p>
+          </div>
+          <div className="flex items-end justify-between gap-4 sm:block sm:text-right">
+            <div>
+              <p className="text-sm text-muted-foreground">Disputed amount</p>
+              <p className="text-3xl font-semibold tabular-nums tracking-tight text-foreground">{amount}</p>
+            </div>
+            {dispute.sellerResponseDueAt && !closed && caseState !== "SUBMITTED" && (
+              <div className="sm:mt-1.5">
+                <DeadlinePill dueAt={dispute.sellerResponseDueAt} />
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         </div>
 
-        {/* CENTER COLUMN: Facts, Analysis, and Draft Response (6 cols) */}
-        <div className="lg:col-span-6 space-y-6">
-          {/* Recommendation Card */}
-          {analysis && (
-            <Card className="border-primary/20 bg-primary/5">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={recommendationVariant[analysis.recommendation] ?? "outline"}
-                      className="text-xs font-bold px-2.5 py-0.5"
-                    >
-                      RECOMMENDATION: {analysis.recommendation}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground font-medium">
-                      Evidence Strength: <strong>{analysis.strengthScore}%</strong> ({analysis.pWinBand})
-                    </span>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3 text-xs">
-                <p className="text-foreground leading-relaxed font-medium">
-                  {analysis.rationale}
-                </p>
-
-                {/* Deterministic Cost Formula Breakdown */}
-                <div className="rounded-md border border-border bg-background/80 p-3 font-mono text-[11px] space-y-1">
-                  <div className="text-muted-foreground font-sans font-medium text-xs mb-1">
-                    Expected Value Cost Math (Deterministic Code):
-                  </div>
-                  <div>Expected Loss (Fight): <strong>{formatMoney(analysis.fightLossMinor, dispute.currency)}</strong> (includes fees & effort)</div>
-                  <div>Loss If Refunded: <strong>{formatMoney(analysis.refundLossMinor, dispute.currency)}</strong></div>
-                  {analysis.refundLossMinor - analysis.fightLossMinor >= 0 ? (
-                    <div className="text-emerald-700 font-semibold pt-1">
-                      Fighting saves (expected): {formatMoney(analysis.refundLossMinor - analysis.fightLossMinor, dispute.currency)}
-                    </div>
-                  ) : (
-                    <div className="text-amber-700 font-semibold pt-1">
-                      Fighting costs more (expected): {formatMoney(analysis.fightLossMinor - analysis.refundLossMinor, dispute.currency)}
-                    </div>
+        {/* Lifecycle track */}
+        <div>
+          <p className="mb-2 text-sm text-muted-foreground sm:hidden">
+            {currentStep === -1
+              ? steps[steps.length - 1].label
+              : `Step ${currentStep + 1} of ${steps.length}: ${steps[currentStep].label}`}
+          </p>
+          <ol className="grid grid-cols-6 gap-1.5" aria-label="Dispute progress">
+            {steps.map((step) => (
+              <li key={step.key} aria-current={step.status === "current" ? "step" : undefined}>
+                <span
+                  className={cn(
+                    "block h-1.5 rounded-full",
+                    step.status === "done" && "bg-navy",
+                    step.status === "current" && "bg-primary",
+                    step.status === "upcoming" && "bg-border"
                   )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Draft Narrative Editor / Viewer */}
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-                  <FileText className="h-4 w-4 text-primary" />
-                  Grounded Evidence Response Draft
-                </CardTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Every claim is strictly cited to verified fact IDs. Click any chip to inspect source.
-                </p>
-              </div>
-              {analysis?.model && (
-                <Badge variant="outline" className="text-[10px] font-mono">
-                  Model: {analysis.model}
-                </Badge>
-              )}
-            </CardHeader>
-            <CardContent className="space-y-4 text-xs">
-              {groundingErrors.length > 0 && (
-                <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-1.5">
-                  <p className="font-semibold text-destructive flex items-center gap-1.5">
-                    <ShieldAlert className="h-3.5 w-3.5" />
-                    Approval blocked: fix these grounding issues first
-                  </p>
-                  <ul className="list-disc pl-5 space-y-1 text-foreground">
-                    {groundingErrors.map((err, idx) => (
-                      <li key={idx}>
-                        <span className="font-mono text-[10px] text-destructive">{err.code}</span> {err.message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {parsedDraftBody ? (
-                <div className="space-y-4">
-                  <div className="p-3 bg-muted/30 rounded-md border text-muted-foreground italic">
-                    <strong>Summary:</strong> {parsedDraftBody.summary}
-                  </div>
-
-                  {parsedDraftBody.sections?.map((section, sIdx) => (
-                    <div key={sIdx} className="space-y-2">
-                      <h4 className="font-semibold text-foreground text-xs uppercase tracking-wider text-muted-foreground">
-                        {section.heading}
-                      </h4>
-                      {section.paragraphs.map((p, pIdx) => (
-                        <div
-                          key={pIdx}
-                          className="p-3 rounded-md border border-border bg-card space-y-2 hover:border-primary/40 transition-colors"
-                        >
-                          <p className="text-foreground text-xs leading-relaxed">{p.text}</p>
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {p.claimRefs.map((ref) => (
-                              <button
-                                key={ref}
-                                type="button"
-                                onClick={() => showFact(ref)}
-                                aria-label={`Show source fact ${ref}`}
-                                className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${
-                                  selectedFactId === ref
-                                    ? "bg-primary text-primary-foreground border-primary"
-                                    : "bg-muted text-foreground border-border hover:border-primary"
-                                }`}
-                              >
-                                #{ref}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-muted-foreground italic">No draft response generated yet.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Fact Base Viewer */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-                <FileCheck className="h-4 w-4 text-primary" />
-                Verified Ground-Truth Fact Base ({facts.length} facts)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-xs">
-              {facts.map((fact) => {
-                const isSelected = selectedFactId === fact.id;
-                return (
-                  <div
-                    key={fact.id}
-                    id={`fact-${fact.id}`}
-                    onClick={() => setSelectedFactId(fact.id)}
-                    className={`p-3 rounded-md border transition-all cursor-pointer ${
-                      isSelected
-                        ? "border-primary bg-primary/10 ring-1 ring-primary"
-                        : "border-border bg-card hover:bg-muted/30"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-semibold text-primary text-[11px]">
-                          {fact.id}
-                        </span>
-                        <span className="font-medium text-foreground">{fact.label}</span>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        Source: {fact.source}
-                      </span>
-                    </div>
-                    <p className="text-muted-foreground leading-normal">{fact.value}</p>
-                    {fact.untrusted === 1 && (
-                      <Badge variant="destructive" className="mt-2 text-[9px]">
-                        Untrusted External Text
-                      </Badge>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* RIGHT COLUMN: Evidence Checklist & Human Approval (3 cols) */}
-        <div className="lg:col-span-3 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xs uppercase text-muted-foreground font-semibold">
-                Required Evidence Checklist
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5 text-xs">
-              {breakdown.length > 0 ? (
-                breakdown.map((item, idx) => (
-                  <div key={idx} className="flex items-start gap-2">
-                    {item.satisfied ? (
-                      <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                    )}
-                    <div>
-                      <p className={`font-medium ${item.satisfied ? "text-foreground" : "text-muted-foreground"}`}>
-                        {item.signal}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">{item.notes}</p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-muted-foreground italic">Checklist pending analysis</p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Action Station (Strict Human-in-the-Loop) */}
-          <Card className="border-primary/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xs uppercase text-muted-foreground font-semibold flex items-center gap-1.5">
-                <Lock className="h-3.5 w-3.5 text-amber-600" />
-                Human Authorization Gate
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Autonomous PayPal submissions are forbidden. An authorized merchant representative must explicitly approve this evidence packet.
-              </p>
-
-              <Button
-                onClick={() => setShowApprovalModal(true)}
-                disabled={
-                  !draft ||
-                  !groundingPassed ||
-                  caseState === "SUBMITTED" ||
-                  caseState === "RESOLVED" ||
-                  caseState === "REFUNDED" ||
-                  caseState === "ACCEPTED"
-                }
-                className="w-full gap-2 text-xs font-semibold"
-              >
-                {caseState === "SUBMITTED" ? (
-                  <>
-                    <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
-                    Evidence Submitted to PayPal
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-3.5 w-3.5" />
-                    Review & Approve Submission
-                  </>
-                )}
-              </Button>
-              {!draft && (
-                <p className="text-[11px] text-muted-foreground">Approval unlocks once an evidence draft exists.</p>
-              )}
-              {draft && !groundingPassed && (
-                <p className="text-[11px] text-destructive">
-                  Approval is blocked until the draft passes grounding.
-                </p>
-              )}
-
-              <div className="pt-2 border-t space-y-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowRefundModal(true)}
-                  disabled={
-                    caseState === "REFUNDED" ||
-                    caseState === "ACCEPTED" ||
-                    caseState === "RESOLVED"
-                  }
-                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground gap-2"
+                />
+                <span
+                  className={cn(
+                    "mt-2 hidden text-xs sm:block",
+                    step.status === "current" ? "font-semibold text-primary" : "text-muted-foreground",
+                    step.status === "done" && "text-foreground"
+                  )}
                 >
-                  <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
-                  {caseState === "REFUNDED"
-                    ? "Capture Refunded"
-                    : `Refund Dispute (${formatMoney(dispute.amountMinor, dispute.currency)})`}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowAcceptModal(true)}
-                  disabled={
-                    caseState === "ACCEPTED" ||
-                    caseState === "REFUNDED" ||
-                    caseState === "RESOLVED"
-                  }
-                  className="w-full justify-start text-xs text-muted-foreground hover:text-foreground gap-2"
-                >
-                  <XCircle className="h-3.5 w-3.5 text-destructive" />
-                  {caseState === "ACCEPTED" ? "Claim Accepted" : "Accept Buyer Claim"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Read-Only AI Inquiry Panel (PayPal Agent Toolkit) */}
-          <Card className="border-primary/20 bg-primary/[0.02]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xs uppercase text-primary font-semibold flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  <Bot className="h-4 w-4 text-primary" />
-                  Ask Copilot
+                  {step.label}
                 </span>
-                <Badge variant="outline" className="text-[10px] text-primary bg-primary/5">
-                  PayPal Agent Toolkit
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Investigate this dispute using read-only PayPal tools (<code className="text-[10px]">get_dispute</code>, <code className="text-[10px]">get_shipment_tracking</code>).
-              </p>
-
-              <form onSubmit={handleAskSubmit} className="space-y-2">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={askQuestion}
-                    onChange={(e) => setAskQuestion(e.target.value)}
-                    placeholder="e.g. What is the delivery tracking proof?"
-                    className="flex-1 px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    className="h-8 text-xs font-semibold gap-1 shrink-0"
-                    disabled={askLoading || !askQuestion.trim()}
-                  >
-                    {askLoading ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3 w-3" />
-                    )}
-                    <span>Ask</span>
-                  </Button>
-                </div>
-              </form>
-
-              {askAnswer && (
-                <div className="p-3 bg-card border rounded-md text-xs space-y-2 mt-2">
-                  <div className="flex items-center justify-between border-b pb-1.5 text-muted-foreground text-[10px]">
-                    <span className="font-semibold text-foreground flex items-center gap-1">
-                      <Sparkles className="h-3 w-3 text-primary" /> Response
-                    </span>
-                    {askToolsUsed.length > 0 && (
-                      <span className="flex items-center gap-1">
-                        Tools: {askToolsUsed.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                  <div className="whitespace-pre-wrap leading-relaxed text-foreground">
-                    {askAnswer}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                <span className="sr-only">{step.status === "done" ? "(done)" : step.status === "current" ? "(current)" : ""}</span>
+              </li>
+            ))}
+          </ol>
         </div>
       </div>
 
-      {/* Human Approval Modal */}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        {/* Main column */}
+        <div className="min-w-0 space-y-6">
+          {/* Recommendation */}
+          {analysis && recMeta ? (
+            <section aria-label="Recommendation" className="overflow-hidden rounded-xl border bg-card">
+              <div className="border-b bg-accent/50 px-5 py-4">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h2 className="text-xl font-semibold text-foreground">
+                    Recommended: {recMeta.headline.charAt(0).toLowerCase()}
+                    {recMeta.headline.slice(1)}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Evidence strength <span className="font-semibold tabular-nums text-foreground">{analysis.strengthScore}%</span>
+                    {" · "}
+                    {winBandLabel(analysis.pWinBand)}
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-6 p-5 xl:grid-cols-2">
+                <div className="space-y-4">
+                  <p className="max-w-[65ch] text-[15px] leading-relaxed text-foreground">{analysis.rationale}</p>
+                  <div className="space-y-3">
+                    {costRows.map((row) => {
+                      const recommended = row.key === recommendation;
+                      return (
+                        <div key={row.key}>
+                          <div className="flex items-baseline justify-between gap-3 text-sm">
+                            <span className={cn("font-medium", recommended ? "text-foreground" : "text-muted-foreground")}>
+                              {row.label}
+                              {recommended && <span className="ml-2 text-xs font-semibold text-primary">Recommended</span>}
+                            </span>
+                            <span className="font-semibold tabular-nums text-foreground">
+                              {formatMoney(row.minor, dispute.currency)}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 h-2.5 rounded-full bg-muted">
+                            <div
+                              className={cn("h-full rounded-full", recommended ? "bg-primary" : "bg-input")}
+                              style={{ width: `${Math.max(2, Math.round((row.minor * 100) / maxLoss))}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{row.note}</p>
+                        </div>
+                      );
+                    })}
+                    <p className="text-sm font-medium text-foreground">
+                      {refundLoss - fightLoss >= 0
+                        ? `Fighting saves about ${formatMoney(refundLoss - fightLoss, dispute.currency)} on average.`
+                        : `Fighting costs about ${formatMoney(fightLoss - refundLoss, dispute.currency)} more on average.`}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Calculated by code from fees, effort, and win probability. The AI writes the explanation only.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="xl:border-l xl:pl-6">
+                  <h3 className="text-sm font-semibold text-foreground">What PayPal looks for</h3>
+                  {breakdown.length > 0 ? (
+                    <ul className="mt-3 space-y-3">
+                      {breakdown.map((item, idx) => (
+                        <li key={idx} className="flex gap-3">
+                          <span
+                            className={cn(
+                              "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+                              item.satisfied ? "bg-success-soft text-success" : "bg-muted text-muted-foreground"
+                            )}
+                          >
+                            {item.satisfied ? (
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                            ) : (
+                              <X className="h-3.5 w-3.5" aria-hidden="true" />
+                            )}
+                            <span className="sr-only">{item.satisfied ? "Present" : "Missing"}</span>
+                          </span>
+                          <div className="min-w-0">
+                            <p className={cn("text-sm font-medium", item.satisfied ? "text-foreground" : "text-muted-foreground")}>
+                              {item.signal}
+                            </p>
+                            <p className="text-sm text-muted-foreground">{item.notes}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted-foreground">The checklist appears once the analysis is done.</p>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : (
+            <section aria-label="Recommendation" className="rounded-xl border border-dashed bg-card p-5">
+              <h2 className="text-base font-semibold text-foreground">No recommendation yet</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                It appears once the analysis has compared the cost of fighting against refunding, using the facts below.
+              </p>
+            </section>
+          )}
+
+          {nextStepPanel("lg:hidden")}
+
+          {/* Evidence draft */}
+          <Section
+            title="Evidence for PayPal"
+            description="Every sentence cites the record it comes from. Select a citation to see the source."
+            aside={
+              draft ? (
+                groundingPassed ? (
+                  <Badge variant="success">
+                    <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                    All claims backed · {citedFactIds.length} facts in {paragraphCount} paragraphs
+                  </Badge>
+                ) : (
+                  <Badge variant="destructive">
+                    <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                    {groundingErrors.length} unsupported {groundingErrors.length === 1 ? "claim" : "claims"}
+                  </Badge>
+                )
+              ) : undefined
+            }
+          >
+            {groundingErrors.length > 0 && (
+              <div role="alert" className="mb-5 rounded-lg bg-destructive-soft p-4 text-sm">
+                <p className="flex items-center gap-2 font-semibold text-destructive">
+                  <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+                  Approval is blocked until these are fixed
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-6 text-foreground">
+                  {groundingErrors.map((err, idx) => (
+                    <li key={idx}>
+                      {err.message} <span className="font-mono text-xs text-destructive">{err.code}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {parsedDraftBody ? (
+              <div className="space-y-6">
+                {parsedDraftBody.summary && (
+                  <p className="max-w-[65ch] text-[15px] font-medium leading-relaxed text-foreground">
+                    {parsedDraftBody.summary}
+                  </p>
+                )}
+                {parsedDraftBody.sections?.map((section, sIdx) => (
+                  <div key={sIdx}>
+                    <h3 className="text-sm font-semibold text-foreground">{section.heading}</h3>
+                    <div className="mt-2 space-y-2">
+                      {section.paragraphs.map((p, pIdx) => {
+                        const linked = selectedFactId !== null && p.claimRefs.includes(selectedFactId);
+                        return (
+                          <div
+                            key={pIdx}
+                            className={cn(
+                              "rounded-lg border p-3 transition-colors duration-200",
+                              linked ? "border-primary bg-accent/60" : "border-transparent bg-muted/60"
+                            )}
+                          >
+                            <p className="max-w-[70ch] text-sm leading-relaxed text-foreground">{p.text}</p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {p.claimRefs.map((ref) => (
+                                <button
+                                  key={ref}
+                                  type="button"
+                                  onClick={() => showFact(ref)}
+                                  aria-label={`Show source fact ${ref}`}
+                                  aria-pressed={selectedFactId === ref}
+                                  className={cn(
+                                    "inline-flex h-7 items-center rounded-md border px-2 font-mono text-xs transition-colors duration-150",
+                                    selectedFactId === ref
+                                      ? "border-primary bg-primary text-primary-foreground"
+                                      : "border-border bg-card text-accent-foreground hover:border-primary"
+                                  )}
+                                >
+                                  {ref}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {analysis?.model && <p className="text-xs text-muted-foreground">Drafted by {analysis.model}</p>}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">The evidence draft hasn&apos;t been written yet.</p>
+            )}
+          </Section>
+
+          {/* Fact base */}
+          <Section
+            id="facts"
+            title={`Fact base (${facts.length})`}
+            description="Records from your store and PayPal. The draft may only restate these."
+          >
+            <ul className="space-y-2">
+              {facts.map((fact) => {
+                const isSelected = selectedFactId === fact.id;
+                const cited = citationCounts[fact.id] ?? 0;
+                return (
+                  <li key={fact.id} id={`fact-${fact.id}`} className="scroll-mt-24">
+                    <button
+                      type="button"
+                      onClick={() => toggleFact(fact.id)}
+                      aria-pressed={isSelected}
+                      className={cn(
+                        "w-full rounded-lg border p-3 text-left transition-colors duration-200",
+                        isSelected ? "animate-cite-flash border-primary bg-accent/60" : "border-border hover:bg-muted/60"
+                      )}
+                    >
+                      <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="font-mono text-xs font-semibold text-accent-foreground">{fact.id}</span>
+                        <span className="text-sm font-medium text-foreground">{fact.label}</span>
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {cited > 0 ? `Cited ${cited}×` : "Not cited"}
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-sm text-muted-foreground">{fact.value}</span>
+                      <span className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{fact.source}</span>
+                        {fact.untrusted === 1 && (
+                          <Badge variant="warning">Buyer-written text · treated as data only</Badge>
+                        )}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </Section>
+        </div>
+
+        {/* Side column */}
+        <aside className="min-w-0 space-y-6 lg:sticky lg:top-6">
+          {nextStepPanel("hidden lg:block")}
+
+          {/* Order */}
+          <Section title="Order">
+            {order ? (
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-sm">
+                <dt className="text-muted-foreground">Order</dt>
+                <dd className="font-mono text-xs leading-5 text-foreground">{order.id}</dd>
+                <dt className="text-muted-foreground">Buyer</dt>
+                <dd className="min-w-0 text-foreground">
+                  {order.buyerName || "—"}
+                  {order.buyerEmail && <span className="block truncate text-muted-foreground">{order.buyerEmail}</span>}
+                </dd>
+                <dt className="text-muted-foreground">Status</dt>
+                <dd className="text-foreground">{humanizeEnum(order.status)}</dd>
+                {order.trackingNumber && (
+                  <>
+                    <dt className="text-muted-foreground">Tracking</dt>
+                    <dd className="flex items-center gap-1.5 text-foreground">
+                      <Truck className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <span className="font-mono text-xs">
+                        {order.carrier} {order.trackingNumber}
+                      </span>
+                    </dd>
+                  </>
+                )}
+                <dt className="text-muted-foreground">PayPal stage</dt>
+                <dd className="text-foreground">{humanizeEnum(dispute.lifeCycleStage || "INQUIRY")}</dd>
+                {dispute.sellerResponseDueAt && (
+                  <>
+                    <dt className="text-muted-foreground">Respond by</dt>
+                    <dd className="text-foreground">{formatUtc(dispute.sellerResponseDueAt)}</dd>
+                  </>
+                )}
+              </dl>
+            ) : (
+              <p className="text-sm text-muted-foreground">No store order is linked to this dispute.</p>
+            )}
+          </Section>
+
+          {/* Ask copilot */}
+          <Section
+            title="Ask about this dispute"
+            description={
+              <>
+                Read-only answers from PayPal Agent Toolkit (
+                <span className="font-mono text-xs">get_dispute</span>, shipment tracking). It can&apos;t change anything.
+              </>
+            }
+          >
+            <form onSubmit={handleAskSubmit} className="flex gap-2">
+              <label htmlFor="ask-question" className="sr-only">
+                Question
+              </label>
+              <input
+                id="ask-question"
+                type="text"
+                value={askQuestion}
+                onChange={(e) => setAskQuestion(e.target.value)}
+                placeholder="Was the package delivered?"
+                className="h-10 min-w-0 flex-1 rounded-full border border-input bg-card px-4 text-base text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 sm:text-sm"
+              />
+              <Button type="submit" variant="secondary" disabled={askLoading || !askQuestion.trim()}>
+                {askLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Bot className="h-4 w-4" aria-hidden="true" />
+                )}
+                Ask
+              </Button>
+            </form>
+            {askLoading && (
+              <p className="mt-3 text-sm text-muted-foreground" role="status">
+                Checking PayPal…
+              </p>
+            )}
+            {askAnswer && (
+              <div className="mt-3 rounded-lg bg-muted/70 p-3 text-sm" aria-live="polite">
+                <p className="whitespace-pre-wrap leading-relaxed text-foreground">{askAnswer}</p>
+                {askToolsUsed.length > 0 && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Tools used: <span className="font-mono">{askToolsUsed.join(", ")}</span>
+                  </p>
+                )}
+              </div>
+            )}
+          </Section>
+
+          {/* Activity */}
+          <Section title="Activity">
+            {auditLogList.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
+            ) : (
+              <ol className="space-y-4">
+                {auditLogList.map((log, i) => (
+                  <li key={log.id} className="relative flex gap-3">
+                    {i < auditLogList.length - 1 && (
+                      <span aria-hidden="true" className="absolute left-[5px] top-4 h-[calc(100%+0.25rem)] w-px bg-border" />
+                    )}
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "relative mt-1.5 h-[11px] w-[11px] shrink-0 rounded-full border-2 bg-card",
+                        log.actor === "human" ? "border-primary" : "border-navy"
+                      )}
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">{humanizeEnum(log.action)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {ACTOR_LABELS[log.actor] ?? humanizeEnum(log.actor)} · {formatUtc(log.ts)}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Section>
+        </aside>
+      </div>
+
+      {/* Phone and tablet: keep the primary action in thumb reach */}
+      {showMobileBar && primaryAction && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-8px_24px_-12px_hsl(var(--navy)/0.25)] backdrop-blur lg:hidden">
+          <div className="mx-auto flex max-w-xl items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-foreground">{nextStepTitle}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {approveBlocker ?? `${amount} · ${reasonLabel(dispute.reason).toLowerCase()}`}
+              </p>
+            </div>
+            <Button
+              onClick={actionConfig[primaryAction].open}
+              disabled={!actionConfig[primaryAction].enabled}
+              variant={primaryAction === "approve" ? "default" : "outline"}
+            >
+              <PrimaryIcon className="h-4 w-4" aria-hidden="true" />
+              {primaryAction === "approve" ? "Review" : primaryAction === "refund" ? "Refund" : "Accept"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Approve and send */}
       <Dialog open={showApprovalModal} onOpenChange={setShowApprovalModal}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-primary" />
-            Merchant Approval Confirmation
-          </DialogTitle>
+          <DialogTitle>Send this evidence to PayPal?</DialogTitle>
           <DialogDescription>
-            You are authorizing DisputeDefender to transmit the following evidence packet to the PayPal Disputes API (Sandbox).
+            You are approving the evidence packet below. DisputeDefender sends it through the PayPal Disputes API
+            (Sandbox).
           </DialogDescription>
         </DialogHeader>
 
-        <dl className="space-y-2 text-xs border rounded-lg p-3 bg-muted/20">
-          <div>
-            <dt className="font-semibold">Dispute ID</dt>
-            <dd className="font-mono">{dispute.paypalDisputeId}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold">Evidence type</dt>
-            <dd className="font-mono">{draft?.evidenceType ?? "—"}</dd>
-          </div>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-lg bg-muted/70 p-4 text-sm">
+          <dt className="text-muted-foreground">Dispute</dt>
+          <dd className="font-mono text-xs leading-5">{dispute.paypalDisputeId}</dd>
+          <dt className="text-muted-foreground">Evidence type</dt>
+          <dd>{draft?.evidenceType ? humanizeEnum(draft.evidenceType) : "—"}</dd>
           {order?.carrier && order.trackingNumber && (
-            <div>
-              <dt className="font-semibold">Tracking</dt>
-              <dd className="font-mono">
-                {order.carrier} · {order.trackingNumber}
+            <>
+              <dt className="text-muted-foreground">Tracking</dt>
+              <dd className="font-mono text-xs leading-5">
+                {order.carrier} {order.trackingNumber}
               </dd>
-            </div>
+            </>
           )}
-          <div>
-            <dt className="font-semibold">Notes sent to PayPal</dt>
-            <dd className="whitespace-pre-wrap">{draft?.notesText || "—"}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold">Cited facts ({citedFactIds.length})</dt>
-            <dd className="font-mono">{citedFactIds.length > 0 ? citedFactIds.join(", ") : "—"}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold">Grounding</dt>
-            <dd>
-              {groundingPassed
-                ? "Passed"
-                : `Not passed (${draft?.groundingStatus ?? "no draft"})`}
-            </dd>
-          </div>
+          <dt className="text-muted-foreground">Cited facts</dt>
+          <dd className="font-mono text-xs leading-5">{citedFactIds.length > 0 ? citedFactIds.join(", ") : "—"}</dd>
+          <dt className="text-muted-foreground">Fact check</dt>
+          <dd>{groundingPassed ? "All claims backed" : `Not passed (${draft?.groundingStatus ?? "no draft"})`}</dd>
         </dl>
 
-        <div className="space-y-1.5 pt-1">
-          <label className="text-xs font-semibold text-foreground">
-            Authorized Merchant Signer:
-          </label>
-          <input
-            type="text"
-            value={approverName}
-            onChange={(e) => setApproverName(e.target.value)}
-            placeholder="e.g. Sarah Jenkins (Merchant Admin)"
-            className="w-full px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          />
+        <div className="mt-4">
+          <p className="text-sm font-medium text-foreground">Note sent to PayPal</p>
+          <p className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border p-3 text-sm text-foreground">
+            {draft?.notesText || "—"}
+          </p>
         </div>
 
-        {submitError && (
-          <p className="text-xs text-destructive bg-destructive/10 p-2 rounded-md border border-destructive/20">
-            {submitError}
-          </p>
-        )}
+        <div className="mt-4 space-y-3">
+          <SignerField id="approve-signer" value={approverName} onChange={setApproverName} />
+          <ErrorNote message={submitError} />
+        </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setShowApprovalModal(false)}
-            disabled={submittingEvidence}
-          >
+          <Button variant="outline" onClick={() => setShowApprovalModal(false)} disabled={submittingEvidence}>
             Cancel
           </Button>
-          <Button
-            onClick={handleApproveAndSubmit}
-            disabled={submittingEvidence || !approverName.trim()}
-            className="gap-2"
-          >
-            {submittingEvidence && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            Confirm & Submit to PayPal
+          <Button onClick={handleApproveAndSubmit} disabled={submittingEvidence || !approverName.trim()}>
+            {submittingEvidence ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="h-4 w-4" aria-hidden="true" />
+            )}
+            {submittingEvidence ? "Sending…" : "Approve and send"}
           </Button>
         </DialogFooter>
       </Dialog>
 
-      {/* Refund Modal */}
+      {/* Refund */}
       <Dialog open={showRefundModal} onOpenChange={setShowRefundModal}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <RotateCcw className="h-5 w-5 text-amber-600" />
-            Confirm Capture Refund
-          </DialogTitle>
+          <DialogTitle>Refund {amount} to the buyer?</DialogTitle>
           <DialogDescription>
-            You are authorizing an immediate refund of {formatMoney(dispute.amountMinor, dispute.currency)} via PayPal Payments API (Sandbox).
+            The refund goes out right away through the PayPal Payments API (Sandbox) and closes this dispute.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 text-xs">
-          <div className="border rounded-lg p-3 bg-muted/20 space-y-1.5">
-            <p>
-              <strong>Dispute ID:</strong> <span className="font-mono">{dispute.paypalDisputeId}</span>
-            </p>
-            <p>
-              <strong>Refund Amount:</strong> {formatMoney(dispute.amountMinor, dispute.currency)}
-            </p>
-            <p className="text-muted-foreground text-[11px]">
-              This will execute a refund on capture {dispute.captureId || order?.captureId || "on file"} and transition the case state to REFUNDED.
-            </p>
-          </div>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-lg bg-muted/70 p-4 text-sm">
+          <dt className="text-muted-foreground">Dispute</dt>
+          <dd className="font-mono text-xs leading-5">{dispute.paypalDisputeId}</dd>
+          <dt className="text-muted-foreground">Amount</dt>
+          <dd className="font-semibold tabular-nums">{amount}</dd>
+          <dt className="text-muted-foreground">Capture</dt>
+          <dd className="font-mono text-xs leading-5">{dispute.captureId || order?.captureId || "On file"}</dd>
+        </dl>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">
-              Authorized Merchant Signer:
-            </label>
-            <input
-              type="text"
-              value={approverName}
-              onChange={(e) => setApproverName(e.target.value)}
-              placeholder="e.g. Sarah Jenkins (Merchant Admin)"
-              className="w-full px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {refundError && (
-            <p className="text-xs text-destructive bg-destructive/10 p-2 rounded-md border border-destructive/20">
-              {refundError}
-            </p>
-          )}
+        <div className="mt-4 space-y-3">
+          <SignerField id="refund-signer" value={approverName} onChange={setApproverName} />
+          <ErrorNote message={refundError} />
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setShowRefundModal(false)}
-            disabled={refunding}
-          >
+          <Button variant="outline" onClick={() => setShowRefundModal(false)} disabled={refunding}>
             Cancel
           </Button>
-          <Button
-            onClick={handleRefund}
-            disabled={refunding || !approverName.trim()}
-            variant="destructive"
-            className="gap-2"
-          >
-            {refunding && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            Confirm & Issue Refund
+          <Button onClick={handleRefund} disabled={refunding || !approverName.trim()} variant="destructive">
+            {refunding && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {refunding ? "Refunding…" : `Refund ${amount}`}
           </Button>
         </DialogFooter>
       </Dialog>
 
-      {/* Accept Buyer Claim Modal */}
+      {/* Accept claim */}
       <Dialog open={showAcceptModal} onOpenChange={setShowAcceptModal}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <XCircle className="h-5 w-5 text-destructive" />
-            Confirm Accept Buyer Claim
-          </DialogTitle>
+          <DialogTitle>Accept the buyer&apos;s claim?</DialogTitle>
           <DialogDescription>
-            You are formally conceding this dispute claim to the customer via PayPal Disputes API (Sandbox).
+            PayPal closes this dispute in the buyer&apos;s favor and debits the disputed {amount} from your account.
+            This can&apos;t be undone.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 text-xs">
-          <div className="border rounded-lg p-3 bg-muted/20 space-y-1.5">
-            <p>
-              <strong>Dispute ID:</strong> <span className="font-mono">{dispute.paypalDisputeId}</span>
-            </p>
-            <p className="text-muted-foreground text-[11px]">
-              PayPal will close this dispute in the buyer&apos;s favor and debit the disputed capital.
-            </p>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground">
-              Authorized Merchant Signer:
-            </label>
-            <input
-              type="text"
-              value={approverName}
-              onChange={(e) => setApproverName(e.target.value)}
-              placeholder="e.g. Sarah Jenkins (Merchant Admin)"
-              className="w-full px-2.5 py-1.5 text-xs rounded-md border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </div>
-
-          {acceptError && (
-            <p className="text-xs text-destructive bg-destructive/10 p-2 rounded-md border border-destructive/20">
-              {acceptError}
-            </p>
-          )}
+        <div className="space-y-3">
+          <SignerField id="accept-signer" value={approverName} onChange={setApproverName} />
+          <ErrorNote message={acceptError} />
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => setShowAcceptModal(false)}
-            disabled={accepting}
-          >
+          <Button variant="outline" onClick={() => setShowAcceptModal(false)} disabled={accepting}>
             Cancel
           </Button>
-          <Button
-            onClick={handleAcceptClaim}
-            disabled={accepting || !approverName.trim()}
-            variant="destructive"
-            className="gap-2"
-          >
-            {accepting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            Confirm & Accept Claim
+          <Button onClick={handleAcceptClaim} disabled={accepting || !approverName.trim()} variant="destructive">
+            {accepting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {accepting ? "Accepting…" : "Accept the claim"}
           </Button>
         </DialogFooter>
       </Dialog>
