@@ -39,6 +39,35 @@ describe("Deterministic Cost Comparison & Decision Engine", () => {
     expect(decision.lossIfRefundMinor).toBe(1000);
   });
 
+  it("recommends REFUND for a weak case even when the average favors fighting (Scenario S2)", () => {
+    // S2: $120.00, 0 fee, $5.00 effort, low band pWin 0.30
+    // expectedLossIfFight = 0.70 * 12000 + 500 = 8900 < 12000, but the case is weak
+    const decision = evaluateDecision({
+      amountMinor: 12000,
+      feeMinor: 0,
+      effortCostMinor: 500,
+      pWin: 0.3,
+      hasValidEvidence: true,
+    });
+
+    expect(decision.recommendation).toBe("REFUND");
+    expect(decision.expectedLossIfFightMinor).toBe(8900);
+    expect(decision.rationale).toContain("70%");
+  });
+
+  it("still recommends FIGHT for a medium case with favorable expected value", () => {
+    const decision = evaluateDecision({
+      amountMinor: 8900,
+      feeMinor: 0,
+      effortCostMinor: 500,
+      pWin: 0.5,
+      hasValidEvidence: true,
+    });
+
+    expect(decision.recommendation).toBe("FIGHT");
+    expect(decision.expectedLossIfFightMinor).toBe(4950);
+  });
+
   it("recommends ACCEPT when no valid evidence exists", () => {
     const decision = evaluateDecision({
       amountMinor: 15000,

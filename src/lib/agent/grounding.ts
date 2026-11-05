@@ -109,8 +109,9 @@ function extractTracking(text: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = TRACKING_REGEX.exec(text)) !== null) {
     const val = match[0];
-    // Ignore purely alphabetical words shorter than 12 letters (standard english words)
-    if (/^[A-Za-z]+$/.test(val) && val.length < 12) continue;
+    // Carrier tracking numbers always contain digits; purely alphabetical tokens are words
+    // ("confirmation", "successfully") and must not be treated as reference codes.
+    if (/^[A-Za-z]+$/.test(val)) continue;
     // Ignore pure dates like 20261020 or 2026
     if (/^\d{4}$/.test(val)) continue;
     tracking.push(val.toLowerCase());

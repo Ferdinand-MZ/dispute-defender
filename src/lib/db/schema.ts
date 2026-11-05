@@ -86,6 +86,7 @@ export const drafts = sqliteTable("drafts", {
   groundingStatus: text("grounding_status").notNull(), // pass, fail, edited_pass
   groundingErrorsJson: text("grounding_errors_json"),
   status: text("status").notNull().default("draft"), // draft, approved, submitted
+  author: text("author"), // LLM model id, "template", or "merchant_edit"
   createdAt: text("created_at").notNull(),
 });
 

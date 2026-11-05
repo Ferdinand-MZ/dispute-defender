@@ -104,6 +104,25 @@ describe("Grounding Validator", () => {
     expect(result.errors[0].code).toBe("INVALID_REF");
   });
 
+  it("does not mistake long ordinary words for tracking numbers", () => {
+    const draft: DraftPayload = {
+      summary: "Delivery confirmation summary.",
+      sections: [
+        {
+          heading: "Shipment",
+          paragraphs: [
+            {
+              text: "The shipment was successfully dispatched; delivery confirmation is documented.",
+              claimRefs: ["F-track-001"],
+            },
+          ],
+        },
+      ],
+    };
+    const result = validateGrounding(draft, mockFacts);
+    expect(result.errors.filter((e) => e.code === "HALLUCINATED_TRACKING")).toEqual([]);
+  });
+
   it("catches hallucinated tracking numbers (adversarial test)", () => {
     const draftWithFakeTracking: DraftPayload = {
       summary: "Summary",

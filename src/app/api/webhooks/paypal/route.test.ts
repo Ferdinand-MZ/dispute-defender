@@ -12,12 +12,14 @@ const verifyWebhookSignature = vi.hoisted(() => vi.fn());
 const updatedEvents = vi.hoisted(() => new Map<string, any>());
 const syncPayPalDisputeToDb = vi.hoisted(() => vi.fn());
 const getSandboxDispute = vi.hoisted(() => vi.fn());
+const processDisputeInBackground = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/paypal/webhook", () => ({ verifyWebhookSignature }));
 vi.mock("@/lib/audit", () => ({ logAudit: vi.fn() }));
 vi.mock("@/lib/paypal/disputes", () => ({ getSandboxDispute }));
 vi.mock("@/lib/paypal/sync", () => ({ syncPayPalDisputeToDb }));
+vi.mock("@/lib/agent/pipeline", () => ({ processDisputeInBackground }));
 vi.mock("@/lib/db", () => ({
   db: {
     insert: () => ({
@@ -114,7 +116,7 @@ describe("POST /api/webhooks/paypal", () => {
       status: "WAITING_FOR_SELLER_RESPONSE",
       dispute_amount: { currency_code: "USD", value: "48.00" },
     });
-    syncPayPalDisputeToDb.mockResolvedValue({});
+    syncPayPalDisputeToDb.mockResolvedValue({ paypalDisputeId: "PP-D-INTAKE-1", caseState: "NEW" });
 
     const req = new NextRequest("http://localhost/api/webhooks/paypal", {
       method: "POST",
@@ -130,6 +132,33 @@ describe("POST /api/webhooks/paypal", () => {
     expect(res.status).toBe(200);
     expect(getSandboxDispute).toHaveBeenCalledWith("PP-D-INTAKE-1");
     expect(syncPayPalDisputeToDb).toHaveBeenCalled();
+    expect(processDisputeInBackground).toHaveBeenCalledWith("PP-D-INTAKE-1", "webhook:CUSTOMER.DISPUTE.CREATED");
     expect(updatedEvents.get("last")).toHaveProperty("processedAt");
+  });
+
+  it("does not re-run the agent for a case that is already past intake", async () => {
+    verifyWebhookSignature.mockResolvedValue(true);
+    processDisputeInBackground.mockClear();
+    getSandboxDispute.mockResolvedValue({
+      dispute_id: "PP-D-INTAKE-2",
+      reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+      status: "UNDER_REVIEW",
+      dispute_amount: { currency_code: "USD", value: "48.00" },
+    });
+    syncPayPalDisputeToDb.mockResolvedValue({ paypalDisputeId: "PP-D-INTAKE-2", caseState: "SUBMITTED" });
+
+    const req = new NextRequest("http://localhost/api/webhooks/paypal", {
+      method: "POST",
+      headers: signatureHeaders,
+      body: JSON.stringify({
+        id: "WH-EVT-8",
+        event_type: "CUSTOMER.DISPUTE.UPDATED",
+        resource: { dispute_id: "PP-D-INTAKE-2" },
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(processDisputeInBackground).not.toHaveBeenCalled();
   });
 });

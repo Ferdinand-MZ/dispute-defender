@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { disputes, orders, facts } from "@/lib/db/schema";
+import { actions, analyses, disputes, drafts, orders } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { logAudit } from "@/lib/audit";
-import { formatMoney } from "@/lib/money";
 import { verifyAdminAuth } from "@/lib/auth";
 import { isDemoMode } from "@/lib/mode";
+import { processDispute } from "@/lib/agent/pipeline";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     if (scenario) {
       const scenarioMap: Record<
         string,
-        { id: string; orderId: string; reason: string; amountMinor: number; dueHours: number; state: string }
+        { id: string; orderId: string; reason: string; amountMinor: number; dueHours: number }
       > = {
         S1: {
           id: "PP-D-1001",
@@ -57,7 +57,6 @@ export async function POST(req: NextRequest) {
           reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
           amountMinor: 4800,
           dueHours: 36,
-          state: "DRAFTED",
         },
         S2: {
           id: "PP-D-1002",
@@ -65,7 +64,6 @@ export async function POST(req: NextRequest) {
           reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
           amountMinor: 12000,
           dueHours: 120,
-          state: "ANALYZED",
         },
         S3: {
           id: "PP-D-1003",
@@ -73,7 +71,6 @@ export async function POST(req: NextRequest) {
           reason: "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
           amountMinor: 8900,
           dueHours: 72,
-          state: "NEW",
         },
         S4: {
           id: "PP-D-1004",
@@ -81,7 +78,6 @@ export async function POST(req: NextRequest) {
           reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
           amountMinor: 3500,
           dueHours: 24,
-          state: "NEW",
         },
       };
 
@@ -95,7 +91,7 @@ export async function POST(req: NextRequest) {
           .update(disputes)
           .set({
             paypalStatus: "WAITING_FOR_SELLER_RESPONSE",
-            caseState: s.state,
+            caseState: "NEW",
             sellerResponseDueAt: hoursFromNow(s.dueHours),
             updatedAt: nowIso,
           })
@@ -111,7 +107,7 @@ export async function POST(req: NextRequest) {
           amountMinor: s.amountMinor,
           currency: "USD",
           sellerResponseDueAt: hoursFromNow(s.dueHours),
-          caseState: s.state,
+          caseState: "NEW",
           rawJson: JSON.stringify({ simulated: true, scenario }),
           createdAt: nowIso,
           updatedAt: nowIso,
@@ -157,28 +153,6 @@ export async function POST(req: NextRequest) {
           createdAt: nowIso,
           updatedAt: nowIso,
         });
-
-        // Add basic dispute facts for this order
-        await db.insert(facts).values([
-          {
-            id: `F-disp-${targetDisputeId}`,
-            disputeId: targetDisputeId,
-            kind: "dispute_msg",
-            label: "Dispute Reason & Amount",
-            value: `Customer filed dispute for ${disputeReason}. Amount: ${formatMoney(order.amountMinor, order.currency)}.`,
-            source: `orders:${order.id}`,
-            untrusted: 0,
-          },
-          {
-            id: `F-ord-${targetDisputeId}-${order.id}`,
-            disputeId: targetDisputeId,
-            kind: "order",
-            label: "Order Transaction",
-            value: `Order ${order.id} placed for ${order.buyerName || "buyer"} totaling ${formatMoney(order.amountMinor, order.currency)}.`,
-            source: `orders:${order.id}`,
-            untrusted: 0,
-          },
-        ]);
       }
     } else {
       return NextResponse.json(
@@ -186,6 +160,13 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // A simulated dispute starts fresh: earlier analyses, drafts, and actions belong to the old run.
+    db.transaction((tx) => {
+      tx.delete(analyses).where(eq(analyses.disputeId, targetDisputeId)).run();
+      tx.delete(drafts).where(eq(drafts.disputeId, targetDisputeId)).run();
+      tx.delete(actions).where(eq(actions.disputeId, targetDisputeId)).run();
+    });
 
     await logAudit({
       actor: "system",
@@ -198,9 +179,14 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Same path as a real webhook: facts, analysis, and a draft when the case is worth fighting.
+    const result = await processDispute(targetDisputeId, { trigger: "simulator" });
+
     return NextResponse.json({
       success: true,
       disputeId: targetDisputeId,
+      recommendation: result.analysis?.recommendation ?? null,
+      draftStatus: result.draft?.groundingStatus ?? null,
       scenario: scenario || null,
       mode: isDemoMode() ? "demo" : "sandbox",
       simulated: true,

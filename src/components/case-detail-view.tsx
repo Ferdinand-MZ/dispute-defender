@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,15 +19,19 @@ import {
   Check,
   CircleAlert,
   Loader2,
+  Pencil,
+  RefreshCw,
   RotateCcw,
   Send,
+  Sparkles,
+  Trash2,
   ShieldAlert,
   ShieldCheck,
   Truck,
   X,
 } from "lucide-react";
 import type { Dispute, Order, Fact, Analysis, Draft, Action, AuditLogEntry } from "@/lib/db/schema";
-import type { GroundingError } from "@/lib/agent/grounding";
+import type { DraftPayload, GroundingError } from "@/lib/agent/grounding";
 import { CaseStateBadge, DeadlinePill } from "@/components/case-status";
 import {
   caseStateMeta,
@@ -57,6 +62,22 @@ const ACTOR_LABELS: Record<string, string> = {
 };
 
 const DEFAULT_APPROVER = "Rina (store owner)";
+
+// Same demo credential the other case actions send; with APP_PASSWORD set, the browser's Basic auth applies.
+const MERCHANT_HEADERS = { "Content-Type": "application/json", "x-merchant-auth": "demo-merchant-admin" };
+
+/** Who wrote the text the merchant is reading, in plain words. */
+function authorLabel(author: string | null | undefined, kind: "draft" | "rationale"): string {
+  if (!author || author === "rules" || author === "template") {
+    return kind === "draft"
+      ? "Assembled by rules: each paragraph restates one fact"
+      : "Explanation written by rules";
+  }
+  if (author === "merchant_edit") return "Edited by you, then fact-checked again";
+  return kind === "draft"
+    ? `Written by AI (${author}), then fact-checked by code`
+    : `Explanation written by AI (${author}); the numbers and recommendation come from code`;
+}
 
 interface CaseDetailViewProps {
   dispute: Dispute;
@@ -155,6 +176,12 @@ export function CaseDetailView({
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
 
+  // Agent actions: analysis, drafting, and merchant edits
+  const router = useRouter();
+  const [agentBusy, setAgentBusy] = useState<null | "analyze" | "draft" | "save">(null);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<DraftPayload | null>(null);
+
   // Parse draft body JSON if present
   let parsedDraftBody: {
     summary?: string;
@@ -207,6 +234,67 @@ export function CaseDetailView({
     document.getElementById(`fact-${factId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
   const toggleFact = (factId: string) => setSelectedFactId((current) => (current === factId ? null : factId));
+
+  async function runAgentRequest(kind: "analyze" | "draft" | "save", method: "POST" | "PUT", path: string, body?: unknown) {
+    setAgentBusy(kind);
+    setAgentError(null);
+    try {
+      const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/${path}`, {
+        method,
+        headers: MERCHANT_HEADERS,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Something went wrong. Try again.");
+      }
+      setEditDraft(null);
+      // Server components reload the case; the page remounts this view with the new data.
+      router.refresh();
+    } catch (err) {
+      setAgentError((err as Error).message);
+    } finally {
+      setAgentBusy(null);
+    }
+  }
+
+  const handleAnalyze = () => runAgentRequest("analyze", "POST", "analyze");
+  const handleDraft = () => runAgentRequest("draft", "POST", "draft");
+  const handleSaveEdit = () =>
+    editDraft && runAgentRequest("save", "PUT", "draft", { draft: editDraft, editedBy: approverName.trim() || undefined });
+
+  function startEditing() {
+    if (!parsedDraftBody?.sections) return;
+    setEditDraft({
+      summary: parsedDraftBody.summary ?? "",
+      sections: parsedDraftBody.sections.map((s) => ({
+        heading: s.heading,
+        paragraphs: s.paragraphs.map((p) => ({ text: p.text, claimRefs: [...p.claimRefs] })),
+      })),
+    });
+  }
+
+  function updateParagraph(sIdx: number, pIdx: number, text: string) {
+    setEditDraft((current) =>
+      current && {
+        ...current,
+        sections: current.sections.map((s, i) =>
+          i !== sIdx ? s : { ...s, paragraphs: s.paragraphs.map((p, j) => (j === pIdx ? { ...p, text } : p)) }
+        ),
+      }
+    );
+  }
+
+  function removeParagraph(sIdx: number, pIdx: number) {
+    setEditDraft((current) =>
+      current && {
+        ...current,
+        sections: current.sections
+          .map((s, i) => (i !== sIdx ? s : { ...s, paragraphs: s.paragraphs.filter((_, j) => j !== pIdx) }))
+          .filter((s) => s.paragraphs.length > 0),
+      }
+    );
+  }
 
   async function handleApproveAndSubmit() {
     if (!approverName.trim()) {
@@ -397,6 +485,8 @@ export function CaseDetailView({
   const canApprove = !!draft && groundingPassed && !["SUBMITTED", "RESOLVED", "REFUNDED", "ACCEPTED"].includes(caseState);
   const canRefund = !["REFUNDED", "ACCEPTED", "RESOLVED"].includes(caseState);
   const canAccept = !["ACCEPTED", "REFUNDED", "RESOLVED"].includes(caseState);
+  // The agent may re-analyze or re-draft until evidence is sent or the case is closed.
+  const canWorkOnCase = !closed && caseState !== "SUBMITTED";
   const recommendation = analysis?.recommendation ?? null;
   const recMeta = recommendation ? recommendationMeta(recommendation) : null;
   const amount = formatMoney(dispute.amountMinor, dispute.currency);
@@ -431,7 +521,10 @@ export function CaseDetailView({
     nextStepBody = "Nothing left to do on this dispute.";
   } else if (primaryAction === "refund") {
     nextStepTitle = "Refund the buyer";
-    nextStepBody = "Fighting is expected to cost more than refunding. Refunding closes the dispute.";
+    nextStepBody =
+      (analysis?.fightLossMinor ?? 0) > (analysis?.refundLossMinor ?? 0)
+        ? "Fighting is expected to cost more than refunding. Refunding closes the dispute."
+        : "Your evidence is too weak to expect a win, so refunding is the safer choice. Refunding closes the dispute.";
   } else if (primaryAction === "accept") {
     nextStepTitle = "Accept the claim";
     nextStepBody = "PayPal closes the dispute in the buyer's favor.";
@@ -443,7 +536,7 @@ export function CaseDetailView({
   let approveBlocker: string | null = null;
   if (primaryAction === "approve" && !canApprove) {
     approveBlocker = !draft
-      ? "The evidence draft isn't ready yet. Approval unlocks when it is."
+      ? "There is no evidence draft yet. Use \"Draft evidence\" below."
       : `Approval is blocked: ${groundingErrors.length || "some"} ${groundingErrors.length === 1 ? "claim isn't" : "claims aren't"} backed by a fact.`;
   }
 
@@ -636,13 +729,25 @@ export function CaseDetailView({
                       );
                     })}
                     <p className="text-sm font-medium text-foreground">
-                      {refundLoss - fightLoss >= 0
-                        ? `Fighting saves about ${formatMoney(refundLoss - fightLoss, dispute.currency)} on average.`
-                        : `Fighting costs about ${formatMoney(fightLoss - refundLoss, dispute.currency)} more on average.`}
+                      {refundLoss - fightLoss < 0
+                        ? `Fighting costs about ${formatMoney(fightLoss - refundLoss, dispute.currency)} more on average.`
+                        : recommendation === "REFUND"
+                          ? `On average fighting saves ${formatMoney(refundLoss - fightLoss, dispute.currency)}, but the win odds are low, so most outcomes lose the full amount.`
+                          : `Fighting saves about ${formatMoney(refundLoss - fightLoss, dispute.currency)} on average.`}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Calculated by code from fees, effort, and win probability. The AI writes the explanation only.
+                      Calculated by code from fees, effort, and win probability. {authorLabel(analysis.model, "rationale")}.
                     </p>
+                    {canWorkOnCase && (
+                      <Button variant="ghost" size="sm" onClick={handleAnalyze} disabled={agentBusy !== null}>
+                        {agentBusy === "analyze" ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                        )}
+                        {agentBusy === "analyze" ? "Re-checking the evidence…" : "Re-run analysis"}
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -684,12 +789,24 @@ export function CaseDetailView({
             <section aria-label="Recommendation" className="rounded-xl border border-dashed bg-card p-5">
               <h2 className="text-base font-semibold text-foreground">No recommendation yet</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                It appears once the analysis has compared the cost of fighting against refunding, using the facts below.
+                The analysis scores your evidence and compares the cost of fighting against refunding, using the facts below.
               </p>
+              {canWorkOnCase && (
+                <Button className="mt-4" onClick={handleAnalyze} disabled={agentBusy !== null}>
+                  {agentBusy === "analyze" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {agentBusy === "analyze" ? "Analyzing…" : "Analyze this dispute"}
+                </Button>
+              )}
             </section>
           )}
 
           {nextStepPanel("lg:hidden")}
+
+          <ErrorNote message={agentError} />
 
           {/* Evidence draft */}
           <Section
@@ -711,7 +828,107 @@ export function CaseDetailView({
               ) : undefined
             }
           >
-            {groundingErrors.length > 0 && (
+            {canWorkOnCase && !editDraft && (
+              <div className="mb-5 flex flex-wrap items-center gap-2">
+                <Button
+                  variant={draft ? "outline" : "default"}
+                  size="sm"
+                  onClick={handleDraft}
+                  disabled={agentBusy !== null}
+                >
+                  {agentBusy === "draft" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {agentBusy === "draft" ? "Drafting and fact-checking…" : draft ? "Regenerate draft" : "Draft evidence"}
+                </Button>
+                {parsedDraftBody?.sections && (
+                  <Button variant="outline" size="sm" onClick={startEditing} disabled={agentBusy !== null}>
+                    <Pencil className="h-4 w-4" aria-hidden="true" />
+                    Edit text
+                  </Button>
+                )}
+                {draft && caseState === "APPROVED" && (
+                  <p className="text-xs text-muted-foreground">Changing the draft withdraws your approval.</p>
+                )}
+              </div>
+            )}
+
+            {editDraft && (
+              <div className="space-y-5">
+                <p className="text-sm text-muted-foreground">
+                  Edit the wording or remove paragraphs. Citations stay attached, and the fact check runs again when you
+                  save: any date, amount, carrier, or tracking number must match the cited facts.
+                </p>
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-summary" className="text-sm font-medium text-foreground">
+                    Summary
+                  </label>
+                  <textarea
+                    id="edit-summary"
+                    value={editDraft.summary}
+                    onChange={(e) => setEditDraft({ ...editDraft, summary: e.target.value })}
+                    rows={2}
+                    className="w-full rounded-lg border border-input bg-card p-3 text-sm text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                  />
+                </div>
+                {editDraft.sections.map((section, sIdx) => (
+                  <div key={sIdx} className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground">{section.heading}</h3>
+                    {section.paragraphs.map((p, pIdx) => (
+                      <div key={pIdx} className="rounded-lg border p-3">
+                        <label htmlFor={`edit-${sIdx}-${pIdx}`} className="sr-only">
+                          Paragraph {pIdx + 1} of {section.heading}
+                        </label>
+                        <textarea
+                          id={`edit-${sIdx}-${pIdx}`}
+                          value={p.text}
+                          onChange={(e) => updateParagraph(sIdx, pIdx, e.target.value)}
+                          rows={3}
+                          className="w-full rounded-md border border-input bg-card p-2 text-sm leading-relaxed text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                        />
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {p.claimRefs.map((ref) => (
+                            <span
+                              key={ref}
+                              className="inline-flex h-7 items-center rounded-md border bg-card px-2 font-mono text-xs text-accent-foreground"
+                            >
+                              {ref}
+                            </span>
+                          ))}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="ml-auto"
+                            onClick={() => removeParagraph(sIdx, pIdx)}
+                            aria-label={`Remove paragraph ${pIdx + 1} of ${section.heading}`}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={handleSaveEdit} disabled={agentBusy !== null || editDraft.sections.length === 0}>
+                    {agentBusy === "save" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    {agentBusy === "save" ? "Fact-checking…" : "Save and fact-check"}
+                  </Button>
+                  <Button variant="outline" onClick={() => setEditDraft(null)} disabled={agentBusy !== null}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!editDraft && groundingErrors.length > 0 && (
               <div role="alert" className="mb-5 rounded-lg bg-destructive-soft p-4 text-sm">
                 <p className="flex items-center gap-2 font-semibold text-destructive">
                   <ShieldAlert className="h-4 w-4" aria-hidden="true" />
@@ -727,7 +944,7 @@ export function CaseDetailView({
               </div>
             )}
 
-            {parsedDraftBody ? (
+            {editDraft ? null : parsedDraftBody ? (
               <div className="space-y-6">
                 {parsedDraftBody.summary && (
                   <p className="max-w-[65ch] text-[15px] font-medium leading-relaxed text-foreground">
@@ -774,10 +991,16 @@ export function CaseDetailView({
                     </div>
                   </div>
                 ))}
-                {analysis?.model && <p className="text-xs text-muted-foreground">Drafted by {analysis.model}</p>}
+                <p className="text-xs text-muted-foreground">
+                  {authorLabel(draft?.author, "draft")} · version {draft?.version ?? 1}
+                </p>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">The evidence draft hasn&apos;t been written yet.</p>
+              <p className="text-sm text-muted-foreground">
+                {recommendation && recommendation !== "FIGHT"
+                  ? "No draft was written because the recommendation is not to fight. You can still draft evidence if you want to respond."
+                  : "The evidence draft hasn't been written yet."}
+              </p>
             )}
           </Section>
 

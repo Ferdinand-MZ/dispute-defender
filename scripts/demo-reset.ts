@@ -42,10 +42,10 @@ async function main() {
   console.log("🎉 DEMO RESET COMPLETE");
   console.log("==========================================================");
   console.log("Checklist before recording or demonstrating:");
-  console.log("1. Scenario S1 (PP-D-1001): Earbuds - High score (FIGHT) - Ready to approve & submit.");
-  console.log("2. Scenario S2 (PP-D-1002): Lamp - Weak proof (REFUND recommendation).");
-  console.log("3. Scenario S3 (PP-D-1003): Jacket - Not as described (SNAD).");
-  console.log("4. Scenario S4 (PP-D-1004): Wallet - Prompt injection attempt quarantined.");
+  console.log("1. Scenario S1 (PP-D-1001): Earbuds - delivered, strong proof - FIGHT, grounded draft ready to approve.");
+  console.log("2. Scenario S2 (PP-D-1002): Lamp - no delivery scan, weak proof - REFUND.");
+  console.log("3. Scenario S3 (PP-D-1003): Jacket - not as described, medium proof - FIGHT with draft.");
+  console.log("4. Scenario S4 (PP-D-1004): Cardholder - never shipped - ACCEPT; buyer injection stored as untrusted.");
   console.log("==========================================================\n");
 }
 

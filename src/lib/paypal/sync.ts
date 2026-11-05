@@ -1,10 +1,11 @@
 import { db } from "../db";
-import { orders, disputes, facts, auditLog, Order, Dispute } from "../db/schema";
+import { orders, disputes, auditLog, Order, Dispute } from "../db/schema";
 import { eq, or } from "drizzle-orm";
 import { PayPalOrder, PayPalDispute } from "./types";
-import { toMinorUnits, formatMoney } from "../money";
+import { toMinorUnits } from "../money";
 import { logAudit } from "../audit";
 import { canTransition, transitionState, CaseState } from "../agent/state";
+import { rebuildFacts } from "../agent/facts";
 
 /**
  * Safely upsert a PayPal Sandbox Order into the local SQLite database.
@@ -201,11 +202,11 @@ export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dis
       auditDetail = { reason: dispute.reason, amountMinor, status: dispute.status };
     }
 
-    // Populate or refresh dispute facts within the same transaction
-    extractAndPersistDisputeFacts(tx, dispute.dispute_id, dispute, linkedOrderId);
-
     return tx.select().from(disputes).where(eq(disputes.paypalDisputeId, dispute.dispute_id)).all()[0];
   });
+
+  // Rebuild the fact base from the stored dispute (including buyer messages) and linked order.
+  rebuildFacts(dispute.dispute_id);
 
   if (auditAction) {
     await logAudit({
@@ -217,99 +218,4 @@ export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dis
   }
 
   return result;
-}
-
-/**
- * Extract structured fact items from PayPal dispute object and linked order into the facts table.
- */
-function extractAndPersistDisputeFacts(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  disputeId: string,
-  dispute: PayPalDispute,
-  orderId: string | null
-): void {
-  const existingFacts = tx.select().from(facts).where(eq(facts.disputeId, disputeId)).all();
-  const existingIds = new Set(existingFacts.map((f) => f.id));
-
-  // 1. Dispute Details Fact - stable ID based on full disputeId
-  const fDispId = `F-disp-${disputeId}`;
-  if (!existingIds.has(fDispId)) {
-    tx.insert(facts).values({
-      id: fDispId,
-      disputeId,
-      kind: "dispute_msg",
-      label: "Dispute Reason & Amount",
-      value: `PayPal dispute filed for ${dispute.reason}. Disputed amount: ${dispute.dispute_amount?.value} ${dispute.dispute_amount?.currency_code}. Status: ${dispute.status}.`,
-      source: `paypal:${disputeId}`,
-      untrusted: 0,
-    }).run();
-  }
-
-  // 2. Buyer Messages (Quarantined as untrusted=1) - stable ID based on full disputeId
-  if (dispute.messages && dispute.messages.length > 0) {
-    for (let i = 0; i < dispute.messages.length; i++) {
-      const msg = dispute.messages[i];
-      const fMsgId = `F-bmsg-${disputeId}-${i + 1}`;
-      if (!existingIds.has(fMsgId)) {
-        tx.insert(facts).values({
-          id: fMsgId,
-          disputeId,
-          kind: "dispute_msg",
-          label: `Buyer Message (${msg.posted_by})`,
-          value: msg.content,
-          source: `paypal_messages:${disputeId}`,
-          untrusted: 1, // STRICT PROMPT INJECTION QUARANTINE
-        }).run();
-      }
-    }
-  }
-
-  // 3. If linked to an order, pull order and tracking facts - stable IDs based on disputeId + orderId
-  if (orderId) {
-    const linkedOrder = tx.select().from(orders).where(eq(orders.id, orderId)).all()[0];
-    if (linkedOrder) {
-      const fOrdId = `F-ord-${disputeId}-${orderId}`;
-      if (!existingIds.has(fOrdId)) {
-        tx.insert(facts).values({
-          id: fOrdId,
-          disputeId,
-          kind: "order",
-          label: "Linked Order Record",
-          value: `Order ${linkedOrder.id} placed for ${linkedOrder.buyerName || "buyer"} totaling ${formatMoney(linkedOrder.amountMinor, linkedOrder.currency)}.`,
-          source: `orders:${orderId}`,
-          untrusted: 0,
-        }).run();
-      }
-
-      if (linkedOrder.trackingNumber && linkedOrder.carrier) {
-        const fTrackId = `F-trk-${disputeId}-${orderId}`;
-        if (!existingIds.has(fTrackId)) {
-          tx.insert(facts).values({
-            id: fTrackId,
-            disputeId,
-            kind: "tracking",
-            label: "Carrier Tracking Proof",
-            value: `Shipped via ${linkedOrder.carrier} tracking number ${linkedOrder.trackingNumber}.`,
-            source: `orders:${orderId}`,
-            untrusted: 0,
-          }).run();
-        }
-      }
-
-      if (linkedOrder.deliveredAt) {
-        const fDelId = `F-del-${disputeId}-${orderId}`;
-        if (!existingIds.has(fDelId)) {
-          tx.insert(facts).values({
-            id: fDelId,
-            disputeId,
-            kind: "delivery",
-            label: "Carrier Delivery Confirmation",
-            value: `Carrier verified delivered on ${new Date(linkedOrder.deliveredAt).toLocaleDateString()}.`,
-            source: `orders:${orderId}`,
-            untrusted: 0,
-          }).run();
-        }
-      }
-    }
-  }
 }
