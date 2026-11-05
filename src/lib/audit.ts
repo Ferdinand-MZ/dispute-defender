@@ -8,6 +8,8 @@ export interface LogAuditParams {
   action: string;
   disputeId?: string | null;
   detail?: Record<string, unknown> | null;
+  /** Explicit DB handle, for callers that run while the default handle is still initializing (boot seed). */
+  database?: typeof db;
 }
 
 export async function logAudit({
@@ -15,12 +17,13 @@ export async function logAudit({
   action,
   disputeId = null,
   detail = null,
+  database,
 }: LogAuditParams): Promise<string> {
   const id = `aud_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const ts = new Date().toISOString();
 
   try {
-    await db.insert(auditLog).values({
+    await (database ?? db).insert(auditLog).values({
       id,
       ts,
       actor,

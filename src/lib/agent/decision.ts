@@ -2,6 +2,9 @@ import { formatMoney, fromMinorUnits } from "../money";
 
 export type Recommendation = "FIGHT" | "REFUND" | "ACCEPT";
 
+/** Cases in the "low" or "very low" win band (see WIN_BANDS in scoring.ts) count as weak. */
+export const WEAK_CASE_MAX_PWIN = 0.3;
+
 export interface DecisionInputs {
   amountMinor: number;
   feeMinor: number;
@@ -64,6 +67,12 @@ export function evaluateDecision({
     recommendation = "ACCEPT";
     rationale =
       "No valid fulfillment or delivery evidence on record. Defending without evidence results in automatic loss; accepting the claim prevents further dispute escalation.";
+  } else if (pWin <= WEAK_CASE_MAX_PWIN) {
+    // Architecture section 6: a weak case is refunded even when the average favors fighting,
+    // because most outcomes still lose the full amount plus the merchant's time.
+    recommendation = "REFUND";
+    const lossChance = Math.round((1 - pWin) * 100);
+    rationale = `Weak evidence: the estimated chance of losing is about ${lossChance}%, and a loss costs ${formatMoney(lossIfRefundMinor + feeMinor, curr)} plus your time. Refunding ${formatMoney(lossIfRefundMinor, curr)} now closes the dispute with a known cost.`;
   } else if (expectedLossIfFightMinor < lossIfRefundMinor) {
     recommendation = "FIGHT";
     rationale = `Favorable expected outcome: Fighting is projected to save ${formatMoney(netBenefitOfFightingMinor, curr)} compared to an immediate refund, supported by strong verified evidence.`;

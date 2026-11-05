@@ -6,6 +6,7 @@ import { logAudit } from "@/lib/audit";
 import { env } from "@/lib/env";
 import { getSandboxDispute } from "@/lib/paypal/disputes";
 import { syncPayPalDisputeToDb } from "@/lib/paypal/sync";
+import { processDisputeInBackground } from "@/lib/agent/pipeline";
 import { PayPalDispute } from "@/lib/paypal/types";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -108,7 +109,11 @@ export async function POST(req: NextRequest) {
             throw fetchErr;
           }
         }
-        await syncPayPalDisputeToDb(disputeDetails);
+        const synced = await syncPayPalDisputeToDb(disputeDetails);
+        // New cases go straight to the agent: facts, analysis, and a draft when worth fighting.
+        if (synced.caseState === "NEW") {
+          processDisputeInBackground(synced.paypalDisputeId, `webhook:${eventType}`);
+        }
       }
     }
 

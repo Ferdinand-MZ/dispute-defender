@@ -41,6 +41,19 @@ vi.mock("@/lib/audit", () => ({
   }),
 }));
 
+const mockProcessDispute = vi.hoisted(() =>
+  vi.fn(async (disputeId: string) => ({
+    disputeId,
+    skipped: false,
+    factCount: 6,
+    analysis: { recommendation: "FIGHT" },
+    draft: { groundingStatus: "pass" },
+  }))
+);
+
+// The agent pipeline has its own tests against a real database; here it only has to be called.
+vi.mock("@/lib/agent/pipeline", () => ({ processDispute: mockProcessDispute }));
+
 function getTableNameFromTable(table: any): string {
   return table?.[Symbol.for("drizzle:Name")] || table?.name || "";
 }
@@ -91,6 +104,11 @@ vi.mock("@/lib/db", () => ({
     }),
     transaction: (cb: any) => {
       const tx = {
+        delete: () => ({
+          where: () => ({
+            run: () => {},
+          }),
+        }),
         update: () => ({
           set: (updates: any) => ({
             where: () => ({
@@ -396,6 +414,8 @@ describe("Dispute Lifecycle Action Endpoints (T11, T18, T19, T09)", () => {
       expect(data.success).toBe(true);
       expect(data.disputeId).toBe("PP-D-1001");
       expect(data.scenario).toBe("S1");
+      expect(mockProcessDispute).toHaveBeenCalledWith("PP-D-1001", { trigger: "simulator" });
+      expect(data.recommendation).toBe("FIGHT");
     });
   });
 });

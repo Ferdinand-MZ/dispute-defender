@@ -88,6 +88,7 @@ export function ensureTables(sqlite: Database.Database): void {
       grounding_status TEXT NOT NULL,
       grounding_errors_json TEXT,
       status TEXT NOT NULL DEFAULT 'draft',
+      author TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -119,4 +120,10 @@ export function ensureTables(sqlite: Database.Database): void {
       processed_at TEXT
     );
   `);
+
+  // Databases created before drafts.author existed get the column added in place.
+  const draftColumns = sqlite.prepare("PRAGMA table_info(drafts)").all() as Array<{ name: string }>;
+  if (!draftColumns.some((c) => c.name === "author")) {
+    sqlite.exec("ALTER TABLE drafts ADD COLUMN author TEXT");
+  }
 }

@@ -72,7 +72,7 @@ Money columns store integer minor units plus `currency`. Timestamps are ISO stri
 | `disputes` | `paypal_dispute_id` (PK), `capture_id`, `order_id` (nullable fk), `reason`, `paypal_status`, `life_cycle_stage`, `amount_minor`, `currency`, `seller_response_due_at`, `case_state`, `raw_json`, `created_at`, `updated_at` |
 | `facts` | `id` (stable like `F-ord-001`), `dispute_id`, `kind` (order, payment, tracking, delivery, policy, comms, dispute_msg), `label`, `value`, `source` (table and id), `untrusted` (bool) |
 | `analyses` | `id`, `dispute_id`, `strength_score`, `strength_breakdown_json`, `p_win_band`, `fight_loss_minor`, `refund_loss_minor`, `recommendation`, `rationale`, `model`, `created_at` |
-| `drafts` | `id`, `dispute_id`, `version`, `evidence_type`, `body_json` (paragraphs with `claimRefs`), `notes_text`, `pdf_path`, `grounding_status` (pass, fail, edited_pass), `grounding_errors_json`, `status` (draft, approved, submitted) |
+| `drafts` | `id`, `dispute_id`, `version`, `evidence_type`, `body_json` (paragraphs with `claimRefs`), `notes_text`, `pdf_path`, `grounding_status` (pass, fail, edited_pass), `grounding_errors_json`, `status` (draft, approved, submitted), `author` (model id, template, merchant_edit) |
 | `actions` | `id`, `dispute_id`, `type` (provide_evidence, accept_claim, refund), `payload_json`, `paypal_response_json`, `status`, `approved_by`, `created_at` |
 | `audit_log` | `id`, `ts`, `actor` (agent, human, system, paypal), `dispute_id`, `action`, `detail_json` |
 | `webhook_events` | `event_id` (PK), `event_type`, `payload_json`, `received_at`, `processed_at` |
@@ -129,14 +129,14 @@ Add shipment tracking through PayPal's tracking API (or the toolkit's `create_sh
 
 ## 6. Agent pipeline
 
-All steps log to `audit_log`. Steps 1, 2, 4 are deterministic code. Steps 3 and 5 call the LLM with no tools.
+All steps log to `audit_log`. Steps 1, 2, 4 are deterministic code. Steps 3 and 5 call the LLM with no tools. `src/lib/agent/pipeline.ts` (`processDispute`) runs steps 2 to 5 for one dispute; it only acts on cases in `NEW`, `ANALYZED`, `DRAFTED`, or `NEEDS_ATTENTION`, so an approved or submitted case is never rewritten. The webhook, the sandbox simulator, and the demo seed all use it.
 
-1. **Intake** (`intake.ts`): webhook -> verify -> dedupe -> GET details -> upsert `disputes` -> link `order_id` by capture id -> enqueue analysis.
-2. **Facts** (`facts.ts`): build `facts` rows with stable IDs from order, payment, tracking, delivery status, policies, and comms. Mark buyer-authored text `untrusted=true`.
+1. **Intake** (`app/api/webhooks/paypal/route.ts`, `lib/paypal/sync.ts`): webhook -> verify -> dedupe -> GET details -> upsert `disputes` -> link `order_id` by custom id or capture id -> rebuild facts -> start the pipeline in the background for a new case, so PayPal gets its 200 quickly.
+2. **Facts** (`facts.ts`): build `facts` rows with stable IDs (`F-<kind>-<disputeId>[-n]`) from the dispute, order, payment, ship-to address, tracking, delivery date, shipping and return policies, store messages, and messages on the PayPal dispute. Dates are ISO (`YYYY-MM-DD`) so the validator can compare them. Buyer-authored text is `untrusted=1`. The same records give the evidence signals used by the score, so a signal only counts when a citable fact exists; buyer messages never satisfy the communication-log signal.
 3. **Analyze** (`analyze.ts`):
    - Deterministic **strength score** per reason (see below).
    - Deterministic **cost comparison** (see below).
-   - LLM writes a short rationale from the score breakdown and fact labels. It cannot change numbers or the recommendation.
+   - The LLM writes a short rationale from the checklist and fact labels. It cannot change numbers or the recommendation, and a rationale containing any digit is discarded in favor of the rule-based one. `analyses.model` records who wrote it (`rules` or the model id).
 4. **Decision** (`decision.ts`): recommendation is a pure function of score, amount, fee, effort cost, and evidence validity.
 5. **Draft** (`draft.ts`): LLM returns structured output (zod):
    ```
@@ -145,16 +145,18 @@ All steps log to `audit_log`. Steps 1, 2, 4 are deterministic code. Steps 3 and 
      sections: [{ heading: string, paragraphs: [{ text: string, claimRefs: string[] }] }]
    }
    ```
-   Prompt rules: use only the provided facts, cite fact IDs in `claimRefs`, never invent dates, amounts, tracking numbers, names, or URLs, say "not available" when a fact is missing.
+   Prompt rules: use only the provided facts, cite fact IDs in `claimRefs`, never invent dates, amounts, tracking numbers, names, or URLs, say "not available" when a fact is missing. Buyer-written facts are passed inside `wrapUntrusted` blocks and marked as not citable.
+   A draft is written automatically only when the recommendation is FIGHT; the merchant can request one in any open state. Without a configured model, or when the model call fails, a rule-based draft restates one trusted fact per paragraph. `drafts.author` records the writer (model id, `template`, or `merchant_edit`). `drafts.notes_text` is the summary and paragraphs, cut at a paragraph boundary to PayPal's 2,000-character `notes` limit.
 6. **Grounding** (`grounding.ts`), deterministic:
    - every `claimRefs` entry exists in `facts` for this dispute;
    - every paragraph has at least one ref;
    - every date, amount, tracking number, and carrier name appearing in text also appears in a cited fact (regex extraction and compare);
    - no URL that is not in the facts;
    - no banned phrases ("guarantee", "100%").
-   On failure, retry once with the error list. If it still fails, set `grounding_status=fail`, show errors in the UI, and **block approval** until the human edits the text (re-validated on save) or deletes the offending paragraph.
-7. **Packet** (`evidence/packet-pdf.ts`, Should): PDF with order summary, timeline, tracking, policy excerpt, and the approved narrative, each section tagged with fact IDs.
-8. **Approve and submit** (`actions.ts`): human approval row, then the PayPal write, then store the response and update state.
+   Tracking numbers are tokens of 9 to 34 characters that contain at least one digit; ordinary words are never treated as reference codes.
+   On failure, retry once with the error list. If it still fails, set `grounding_status=fail`, show errors in the UI, and **block approval** until the human edits the text (`PUT /api/cases/[id]/draft`, re-validated on save, stored as `edited_pass` or `fail`) or regenerates it. Every new draft version moves an `APPROVED` case back to `DRAFTED`.
+7. **Packet** (`evidence/packet-pdf.ts`, Should, not implemented): PDF with order summary, timeline, tracking, policy excerpt, and the approved narrative, each section tagged with fact IDs.
+8. **Approve and submit** (`api/cases/[id]/approve`, `api/cases/[id]/submit`): human approval row with a hash of the approved draft, then the PayPal write, then store the response and update state. Submission is refused if the draft changed after approval.
 
 ### Strength score (config in `src/lib/agent/scoring.ts`, labeled "heuristic" in UI)
 
@@ -177,9 +179,10 @@ Band mapping to estimated win likelihood (constants in config, not statistics): 
 ```
 expectedLossIfFight  = (1 - pWin) * (amount + fee) + effortCost
 lossIfRefund         = amount
-recommend FIGHT   if expectedLossIfFight < lossIfRefund and evidence package is valid
-recommend REFUND  if the case is weak or amount is small relative to effortCost
 recommend ACCEPT  if no valid evidence can be produced (nothing to defend with)
+recommend REFUND  if the case is weak (pWin <= 0.30, the low and very low bands),
+                  or expectedLossIfFight >= lossIfRefund
+recommend FIGHT   otherwise (valid evidence, medium or high band, cheaper on average)
 ```
 All three numbers are shown with the formula so a merchant can disagree. Note that with `fee = 0` and `effortCost = 0` fighting always dominates, which is why the constants are configurable and visible.
 

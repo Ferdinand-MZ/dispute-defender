@@ -32,7 +32,9 @@ export function getDb() {
     process.env.DEMO_MODE === "true" ||
     process.env.DEMO_MODE === "1" ||
     process.env.DEMO_MODE === undefined;
-  if (isDemo && process.env.NODE_ENV !== "test") {
+  // The seed and demo-reset scripts seed explicitly; auto-seeding there would run the pipeline twice.
+  const isSeedScript = /(?:seed|demo-reset)\.ts$/.test(process.argv[1] ?? "");
+  if (isDemo && process.env.NODE_ENV !== "test" && !isSeedScript) {
     try {
       const row = _sqlite.prepare("SELECT count(*) as cnt FROM disputes").get() as { cnt: number } | undefined;
       if (!row || row.cnt === 0) {

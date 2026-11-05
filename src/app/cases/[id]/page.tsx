@@ -69,6 +69,8 @@ export default async function CaseDetailPage({ params }: CaseDetailPageProps) {
 
   return (
     <CaseDetailView
+      // Remount after router.refresh() so local state (case state, edit mode) follows the new data.
+      key={`${dispute.caseState}-${analysis?.id ?? "none"}-${draft?.id ?? "none"}`}
       dispute={dispute}
       order={linkedOrder}
       facts={caseFacts}

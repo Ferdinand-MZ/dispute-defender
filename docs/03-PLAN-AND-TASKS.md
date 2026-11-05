@@ -143,7 +143,7 @@ The full list is in `02-ARCHITECTURE.md` section 12. The three most likely to br
 
 ## 7. Verified implementation status
 
-Last checked: Nov 5, 2026.
+Last checked: Nov 5, 2026 (after the agent pipeline work on branch `feat/agent-pipeline`).
 
 ### Done and verified
 - **T07 (Webhook receiver):** `POST /api/webhooks/paypal` verifies the PayPal signature, dedupes by event `id`, fetches the dispute, and syncs it to SQLite. Covered by route tests.
@@ -161,8 +161,10 @@ Last checked: Nov 5, 2026.
 - **T27 (Demo reset):** `pnpm run demo:reset` reseeds scenarios S1 to S4.
 - **Read-only AI assistant:** `POST /api/cases/[id]/ask` answers merchant questions with `@paypal/agent-toolkit` read-only tools (`list_disputes`, `get_dispute`, `get_shipment_tracking`).
 
-### Implemented as library code, not yet wired into the intake flow
-- **T14, T15, T16:** `src/lib/agent/llm.ts` (structured generation), `grounding.ts`, `scoring.ts`, and `decision.ts` are implemented and unit-tested. New disputes do not yet trigger automatic analysis and drafting; the S1 analysis and draft come from the seed script.
+- **T10 (Facts builder):** `src/lib/agent/facts.ts` builds stable, sourced facts (order, payment, address, tracking, delivery, policies, messages) and marks buyer text untrusted. Used by dispute sync, the pipeline, and the analyze route.
+- **T14, T15, T16 (LLM, draft + grounding, analysis):** `analyze.ts` (deterministic score and recommendation, LLM rationale with no numbers), `draft.ts` (LLM draft, grounding validation, one retry with the errors, rule-based fallback), `pipeline.ts` (facts -> analysis -> draft when FIGHT). Wired into the webhook (background), the simulator, and the seed. New routes: `POST /api/cases/[id]/analyze`, `POST` and `PUT /api/cases/[id]/draft`. `decision.ts` now refunds weak cases (low and very low bands). Verified against Gemini (`gemini-3.6-flash`): the S1 draft passed the fact check on the first attempt, and the S4 draft ignored the injected buyer instruction.
+- **T17 (Case detail UI, agent controls):** analyze, regenerate draft, and edit-with-fact-check on the case page; the writer of each draft and rationale is shown.
+- **T24 (Prompt-injection defense):** S4 buyer text is untrusted, excluded from evidence signals, rejected if cited (`UNTRUSTED_REF`), and covered by tests.
 
 ### Not started
 - **T20 (PDF evidence packet):** `pdf-lib` is a dependency but is not used yet.
@@ -172,9 +174,9 @@ Last checked: Nov 5, 2026.
 ### Quality gate results
 - `pnpm run typecheck`: 0 errors (TypeScript strict).
 - `pnpm run lint`: no ESLint warnings or errors.
-- `pnpm run test`: 17 test files, 85 tests passed.
-- `pnpm run build`: Next.js 14 production build succeeds (5 pages, 14 API routes).
+- `pnpm run test`: 18 test files, 101 tests passed.
+- `pnpm run build`: Next.js 14 production build succeeds (5 pages, 16 API routes).
 
 ### Remaining blockers and risks
 - Live sandbox credentials (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`) must be set in the hosting environment to run the real sandbox loop; local development defaults to `DEMO_MODE=true` with fixtures and simulated actions.
-- Automatic analysis and LLM drafting for new disputes still need to be wired into the intake flow.
+- The configured model must be available to the API key: during testing on Nov 5, 2026, `gemini-2.5-flash` was refused for new users and `gemini-3.8-flash` returned "high demand". The app falls back to the rule-based draft and records the reason in the audit log, so the demo keeps working either way.

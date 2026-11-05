@@ -1,17 +1,6 @@
 // ./schema must load before ./index: getDb() auto-seeds while ./index is still loading,
 // so it passes its instance explicitly instead of relying on the circular import.
-import {
-  policies,
-  orders,
-  comms,
-  disputes,
-  facts,
-  analyses,
-  drafts,
-  auditLog,
-  webhookEvents,
-  actions,
-} from "./schema";
+import { policies, orders, comms, disputes, auditLog } from "./schema";
 import { db as defaultDb } from "./index";
 
 export async function seed(db = defaultDb) {
@@ -210,7 +199,7 @@ export async function seed(db = defaultDb) {
       amountMinor: 4800,
       currency: "USD",
       sellerResponseDueAt: hoursFromNow(36), // Due in 36h (< 48h urgency)
-      caseState: "DRAFTED",
+      caseState: "NEW",
       rawJson: JSON.stringify({ mock: true, scenario: "S1" }),
       createdAt: daysAgo(1),
       updatedAt: daysAgo(1),
@@ -225,7 +214,7 @@ export async function seed(db = defaultDb) {
       amountMinor: 12000,
       currency: "USD",
       sellerResponseDueAt: hoursFromNow(120),
-      caseState: "ANALYZED",
+      caseState: "NEW",
       rawJson: JSON.stringify({ mock: true, scenario: "S2" }),
       createdAt: daysAgo(2),
       updatedAt: daysAgo(2),
@@ -266,152 +255,25 @@ export async function seed(db = defaultDb) {
     db.insert(disputes).values(d).onConflictDoNothing().run();
   }
 
-  // 5. Seed Facts for S1 (PP-D-1001)
-  const s1Facts = [
-    {
-      id: "F-ord-001",
-      disputeId: "PP-D-1001",
-      kind: "order",
-      label: "Order Summary",
-      value: "Order O-1001 placed 8 days ago for 1x Wireless Noise-Canceling Earbuds ($48.00 USD).",
-      source: "orders:O-1001",
-      untrusted: 0,
-    },
-    {
-      id: "F-track-001",
-      disputeId: "PP-D-1001",
-      kind: "tracking",
-      label: "Carrier Shipment",
-      value: "Dispatched via FEDEX with tracking number TESTTRACK0001.",
-      source: "orders:O-1001",
-      untrusted: 0,
-    },
-    {
-      id: "F-del-001",
-      disputeId: "PP-D-1001",
-      kind: "delivery",
-      label: "Proof of Delivery",
-      value: "FEDEX scan confirms package successfully delivered to Austin, TX 78701.",
-      source: "orders:O-1001",
-      untrusted: 0,
-    },
-    {
-      id: "F-pol-001",
-      disputeId: "PP-D-1001",
-      kind: "policy",
-      label: "Shipping Terms",
-      value: "Store standard domestic policy states 3-5 business day transit with carrier tracking required.",
-      source: "policies:POL-SHIP-01",
-      untrusted: 0,
-    },
-    {
-      id: "F-com-001",
-      disputeId: "PP-D-1001",
-      kind: "comms",
-      label: "Pre-Dispute Comms",
-      value: "Customer inquired on dispatch and merchant provided tracking link directly.",
-      source: "comms:COM-1001-2",
-      untrusted: 0,
-    },
-  ];
-
-  for (const f of s1Facts) {
-    db.insert(facts).values(f).onConflictDoNothing().run();
+  // 5. Run the real agent pipeline on every demo dispute: facts, analysis, and a draft when the
+  // recommendation is to fight. The rule-based path keeps the demo reproducible and offline;
+  // "Regenerate draft" on the case page uses the configured model.
+  // Loaded lazily: this module is required by getDb() while ./index is still initializing.
+  const { processDispute } = await import("../agent/pipeline");
+  for (const d of demoDisputes) {
+    db.insert(auditLog)
+      .values({
+        id: `AUD-${d.paypalDisputeId}-created`,
+        ts: d.createdAt,
+        actor: "paypal",
+        disputeId: d.paypalDisputeId,
+        action: "CUSTOMER.DISPUTE.CREATED",
+        detailJson: JSON.stringify({ reason: d.reason, amountMinor: d.amountMinor, currency: d.currency }),
+      })
+      .onConflictDoNothing()
+      .run();
+    await processDispute(d.paypalDisputeId, { database: db, model: null, trigger: "seed" });
   }
-
-  // 6. Seed Analysis for S1
-  const s1Analysis = {
-    id: "ANA-1001",
-    disputeId: "PP-D-1001",
-    strengthScore: 100,
-    strengthBreakdownJson: JSON.stringify([
-      { signal: "Carrier & tracking number present", weight: 0.35, satisfied: true, notes: "Verified FEDEX tracking" },
-      { signal: "Delivery confirmed with date", weight: 0.3, satisfied: true, notes: "Carrier delivered scan on file" },
-      { signal: "Delivery address matches order", weight: 0.15, satisfied: true, notes: "Destination Austin, TX matches" },
-      { signal: "Shipping policy on file", weight: 0.1, satisfied: true, notes: "Active policy attached" },
-      { signal: "Communication log present", weight: 0.1, satisfied: true, notes: "Customer acknowledged tracking" },
-    ]),
-    pWinBand: "high",
-    fightLossMinor: 1700,
-    refundLossMinor: 4800,
-    recommendation: "FIGHT",
-    rationale:
-      "All required proof-of-fulfillment criteria are verified. Carrier confirmed delivery to destination zip code. Expected net advantage of fighting is $31.00.",
-    model: "gemini-1.5-flash",
-    createdAt: daysAgo(1),
-  };
-  db.insert(analyses).values(s1Analysis).onConflictDoNothing().run();
-
-  // 7. Seed Draft for S1
-  const s1Draft = {
-    id: "DRF-1001",
-    disputeId: "PP-D-1001",
-    version: 1,
-    evidenceType: "PROOF_OF_FULFILLMENT",
-    bodyJson: JSON.stringify({
-      summary: "Proof of fulfillment and delivery confirmation for order O-1001.",
-      sections: [
-        {
-          heading: "Order & Dispatch Verification",
-          paragraphs: [
-            {
-              text: "The buyer purchased 1x Wireless Noise-Canceling Earbuds totaling $48.00 USD under order O-1001.",
-              claimRefs: ["F-ord-001"],
-            },
-            {
-              text: "The item was promptly fulfilled and dispatched via FEDEX with tracking number TESTTRACK0001.",
-              claimRefs: ["F-track-001"],
-            },
-          ],
-        },
-        {
-          heading: "Carrier Delivery Confirmation",
-          paragraphs: [
-            {
-              text: "Carrier tracking scans confirm the package was delivered to the designated address in Austin, TX 78701.",
-              claimRefs: ["F-del-001"],
-            },
-            {
-              text: "Customer was informed of shipping progress and store shipping terms were strictly fulfilled.",
-              claimRefs: ["F-pol-001", "F-com-001"],
-            },
-          ],
-        },
-      ],
-    }),
-    notesText: "Dispatched via FEDEX tracking TESTTRACK0001. Delivered to destination address on file.",
-    pdfPath: null,
-    groundingStatus: "pass",
-    groundingErrorsJson: "[]",
-    status: "draft",
-    createdAt: daysAgo(1),
-  };
-  db.insert(drafts).values(s1Draft).onConflictDoNothing().run();
-
-  // 8. Seed Audit Log for S1
-  db.insert(auditLog)
-    .values({
-      id: "AUD-1001-1",
-      ts: daysAgo(1),
-      actor: "paypal",
-      disputeId: "PP-D-1001",
-      action: "CUSTOMER.DISPUTE.CREATED",
-      detailJson: JSON.stringify({ reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", amount: "$48.00" }),
-    })
-    .onConflictDoNothing()
-    .run();
-
-  db.insert(auditLog)
-    .values({
-      id: "AUD-1001-2",
-      ts: daysAgo(1),
-      actor: "agent",
-      disputeId: "PP-D-1001",
-      action: "EVIDENCE_ANALYSIS_COMPLETED",
-      detailJson: JSON.stringify({ recommendation: "FIGHT", score: 100 }),
-    })
-    .onConflictDoNothing()
-    .run();
 
   console.log("✅ Seeding completed successfully!");
 }
