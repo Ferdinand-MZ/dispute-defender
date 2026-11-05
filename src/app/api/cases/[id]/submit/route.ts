@@ -4,6 +4,7 @@ import { disputes, drafts, orders, actions, facts } from "@/lib/db/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { canTransition, transitionState, CaseState } from "@/lib/agent/state";
 import { buildEvidencePayload } from "@/lib/evidence/mapping";
+import { generateEvidencePacketPdf } from "@/lib/evidence/packet-pdf";
 import { provideDisputeEvidence } from "@/lib/paypal/disputes";
 import { logAudit } from "@/lib/audit";
 import { verifyMerchantAuth } from "@/lib/auth";
@@ -127,6 +128,7 @@ export async function POST(
     // 6. Fetch Linked Order and Tracking Evidence
     let carrier: string | undefined;
     let trackingNumber: string | undefined;
+    let linkedOrder: (typeof orders.$inferSelect) | null = null;
 
     if (dispute.orderId) {
       const orderRows = await db
@@ -134,18 +136,22 @@ export async function POST(
         .from(orders)
         .where(eq(orders.id, dispute.orderId));
       const order = orderRows[0];
-      if (order?.carrier && order?.trackingNumber) {
-        carrier = order.carrier;
-        trackingNumber = order.trackingNumber;
+      if (order) {
+        linkedOrder = order;
+        if (order.carrier && order.trackingNumber) {
+          carrier = order.carrier;
+          trackingNumber = order.trackingNumber;
+        }
       }
     }
 
+    const caseFacts = await db
+      .select()
+      .from(facts)
+      .where(eq(facts.disputeId, disputeId));
+
     if (!carrier || !trackingNumber) {
-      const trackingFacts = await db
-        .select()
-        .from(facts)
-        .where(eq(facts.disputeId, disputeId));
-      for (const f of trackingFacts) {
+      for (const f of caseFacts) {
         if (f.kind === "tracking" && f.value) {
           const match = f.value.match(/(?:FEDEX|UPS|USPS|DHL)/i);
           if (match && !carrier) carrier = match[0].toUpperCase();
@@ -226,12 +232,20 @@ export async function POST(
       );
     }
 
-    // 8. Construct Compliant Evidence Payload
+    // 8. Construct Compliant Evidence Payload & Generate PDF Evidence Packet (T20)
     const evidencePayload = buildEvidencePayload({
       reason: dispute.reason,
       carrier,
       trackingNumber,
       notesText: draft.notesText || undefined,
+    });
+
+    const evidencePacket = await generateEvidencePacketPdf({
+      dispute,
+      order: linkedOrder,
+      facts: caseFacts,
+      draft,
+      approvedBy,
     });
 
     // 9. Server-Controlled Mode Execution Gate
@@ -242,6 +256,8 @@ export async function POST(
       paypalResponse = formatDemoSimulationResponse("provide_evidence", {
         disputeId,
         evidenceType: evidencePayload.evidences[0]?.evidence_type,
+        attachedPdf: evidencePacket.filename,
+        pdfSizeBytes: evidencePacket.buffer.byteLength,
       });
     } else {
       // SANDBOX MODE: Communicate with PayPal Sandbox API
@@ -263,6 +279,7 @@ export async function POST(
         disputeId,
         evidencePayload,
         approvedBy,
+        evidenceFile: evidencePacket,
         requestId: stableRequestId,
       });
 
@@ -272,6 +289,8 @@ export async function POST(
         status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
         endpoint: `/v1/customer/disputes/${disputeId}/provide-evidence`,
         requestId: stableRequestId,
+        attachedPdf: evidencePacket.filename,
+        pdfSizeBytes: evidencePacket.buffer.byteLength,
       };
     }
 
@@ -300,6 +319,7 @@ export async function POST(
       tx.update(drafts)
         .set({
           status: "submitted",
+          pdfPath: evidencePacket.filename,
         })
         .where(eq(drafts.id, draft.id))
         .run();

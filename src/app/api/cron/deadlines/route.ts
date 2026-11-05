@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import { disputes } from "@/lib/db/schema";
 import { logAudit } from "@/lib/audit";
 import { canTransition, transitionState, CaseState } from "@/lib/agent/state";
+import { isDemoMode } from "@/lib/mode";
+import { listSandboxDisputes, getSandboxDispute } from "@/lib/paypal/disputes";
+import { syncPayPalDisputeToDb } from "@/lib/paypal/sync";
 import { eq, sql } from "drizzle-orm";
 import crypto from "crypto";
 
@@ -30,8 +33,25 @@ export async function POST(req: NextRequest) {
 
   try {
     const nowIso = new Date().toISOString();
+    let polledDisputes = 0;
 
-    // Check for open disputes whose response due date has passed without submission
+    // 1. Webhook Fallback Polling (T21): Poll PayPal Sandbox Disputes API when in sandbox mode with credentials
+    if (!isDemoMode() && env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET) {
+      try {
+        const listRes = await listSandboxDisputes({ pageSize: 20 });
+        for (const item of listRes.items || []) {
+          if (item.dispute_id) {
+            const fullDispute = await getSandboxDispute(item.dispute_id);
+            await syncPayPalDisputeToDb(fullDispute);
+            polledDisputes++;
+          }
+        }
+      } catch (pollErr) {
+        console.warn("[CRON_POLL_WARNING] PayPal dispute fallback poll skipped or failed:", (pollErr as Error).message);
+      }
+    }
+
+    // 2. Check for open disputes whose response due date has passed without submission
     const openDisputes = await db
       .select()
       .from(disputes)
@@ -69,6 +89,7 @@ export async function POST(req: NextRequest) {
       status: "SUCCESS",
       checkedCases: openDisputes.length,
       expiredCases: expiredCount,
+      polledDisputes,
       timestamp: nowIso,
     });
   } catch (err) {
