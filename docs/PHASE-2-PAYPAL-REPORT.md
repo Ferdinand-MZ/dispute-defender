@@ -99,15 +99,15 @@ All tests run with Vitest in-memory without hitting live PayPal endpoints:
 ```bash
 $ pnpm run test
 
- ✓ src/lib/money.test.ts (6 tests: integer minor units, currency decimals, arithmetic)
- ✓ src/lib/agent/state.test.ts (3 tests: state transitions, illegal transition prevention)
- ✓ src/lib/agent/scoring.test.ts (3 tests: evidence heuristic score breakdown)
- ✓ src/lib/agent/decision.test.ts (3 tests: deterministic EV cost formulas)
- ✓ src/lib/agent/grounding.test.ts (5 tests: citation validation, adversarial tracking/amount checks)
- ✓ src/lib/paypal/client.test.ts (3 tests: token caching, 429 retry backoff, Request-Id injection)
- ✓ src/lib/paypal/orders.test.ts (2 tests: create order minor unit formatting, get order parsing)
- ✓ src/lib/paypal/disputes.test.ts (3 tests: list disputes parsing, human-approval check, status pre-flight)
- ✓ src/lib/paypal/sync.test.ts (2 tests: SQLite normalization, deduplication, untrusted message flag)
+ PASS src/lib/money.test.ts (6 tests: integer minor units, currency decimals, arithmetic)
+ PASS src/lib/agent/state.test.ts (3 tests: state transitions, illegal transition prevention)
+ PASS src/lib/agent/scoring.test.ts (3 tests: evidence heuristic score breakdown)
+ PASS src/lib/agent/decision.test.ts (3 tests: deterministic EV cost formulas)
+ PASS src/lib/agent/grounding.test.ts (5 tests: citation validation, adversarial tracking/amount checks)
+ PASS src/lib/paypal/client.test.ts (3 tests: token caching, 429 retry backoff, Request-Id injection)
+ PASS src/lib/paypal/orders.test.ts (2 tests: create order minor unit formatting, get order parsing)
+ PASS src/lib/paypal/disputes.test.ts (3 tests: list disputes parsing, human-approval check, status pre-flight)
+ PASS src/lib/paypal/sync.test.ts (2 tests: SQLite normalization, deduplication, untrusted message flag)
 
 Test Files  9 passed (9)
      Tests  30 passed (30)
@@ -118,15 +118,15 @@ Test Files  9 passed (9)
 ```bash
 # 1. TypeScript Strict Typechecking
 $ pnpm run typecheck
-✓ Completed with 0 errors.
+Completed with 0 errors.
 
 # 2. ESLint
 $ pnpm run lint
-✔ No ESLint warnings or errors.
+No ESLint warnings or errors.
 
 # 3. Next.js Production Build
 $ pnpm run build
- ✓ Compiled successfully (10/10 static/dynamic routes bundled).
+ Compiled successfully (10/10 static/dynamic routes bundled).
 ```
 
 ---
