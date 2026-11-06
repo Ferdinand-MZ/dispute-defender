@@ -10,8 +10,10 @@ import {
   isSandboxMode,
   assertSandboxCredentials,
   formatDemoSimulationResponse,
+  isLocalSeedOrSimulatedDispute,
   PayPalConfigError,
 } from "@/lib/mode";
+import { PayPalApiError } from "@/lib/paypal/client";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -82,43 +84,58 @@ export async function POST(req: NextRequest) {
         throw configErr;
       }
 
-      await adjudicateSandboxDispute(disputeId, outcome as AdjudicationOutcome, approvedBy);
+      try {
+        await adjudicateSandboxDispute(disputeId, outcome as AdjudicationOutcome, approvedBy);
 
-      paypalResponse = {
-        mode: "sandbox",
-        simulated: false,
-        status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
-        endpoint: `/v1/customer/disputes/${disputeId}/adjudicate`,
-        outcome,
-      };
+        paypalResponse = {
+          mode: "sandbox",
+          simulated: false,
+          status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
+          endpoint: `/v1/customer/disputes/${disputeId}/adjudicate`,
+          outcome,
+        };
+      } catch (ppErr) {
+        if (
+          ppErr instanceof PayPalApiError &&
+          ppErr.status === 404 &&
+          isLocalSeedOrSimulatedDispute(disputeRows[0].rawJson)
+        ) {
+          paypalResponse = formatDemoSimulationResponse("adjudicate", {
+            disputeId,
+            outcome,
+            paypalSandboxAuthVerified: true,
+            paypalDebugId: ppErr.debugId,
+          });
+        } else {
+          throw ppErr;
+        }
+      }
     }
 
     const now = new Date().toISOString();
     const actionId = `act_${Date.now()}_adj`;
 
     // 4. Update Database State
-    db.transaction((tx) => {
-      tx.update(disputes)
+    await db.transaction(async (tx) => {
+      await tx
+        .update(disputes)
         .set({
           caseState: "RESOLVED",
           paypalStatus: "RESOLVED",
           updatedAt: now,
         })
-        .where(eq(disputes.paypalDisputeId, disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, disputeId));
 
-      tx.insert(actions)
-        .values({
-          id: actionId,
-          disputeId,
-          type: "adjudicate",
-          payloadJson: JSON.stringify({ outcome, approvedBy }),
-          paypalResponseJson: JSON.stringify(paypalResponse),
-          status: "RESOLVED",
-          approvedBy,
-          createdAt: now,
-        })
-        .run();
+      await tx.insert(actions).values({
+        id: actionId,
+        disputeId,
+        type: "adjudicate",
+        payloadJson: JSON.stringify({ outcome, approvedBy }),
+        paypalResponseJson: JSON.stringify(paypalResponse),
+        status: "RESOLVED",
+        approvedBy,
+        createdAt: now,
+      });
     });
 
     // 5. Log Immutable Audit Record

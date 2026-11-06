@@ -1,6 +1,6 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer } from "drizzle-orm/pg-core";
 
-export const orders = sqliteTable("orders", {
+export const orders = pgTable("orders", {
   id: text("id").primaryKey(),
   paypalOrderId: text("paypal_order_id"),
   captureId: text("capture_id"),
@@ -19,7 +19,7 @@ export const orders = sqliteTable("orders", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const policies = sqliteTable("policies", {
+export const policies = pgTable("policies", {
   id: text("id").primaryKey(),
   kind: text("kind").notNull(), // shipping, return, tos
   title: text("title").notNull(),
@@ -27,7 +27,7 @@ export const policies = sqliteTable("policies", {
   version: text("version").notNull().default("1.0"),
 });
 
-export const comms = sqliteTable("comms", {
+export const comms = pgTable("comms", {
   id: text("id").primaryKey(),
   orderId: text("order_id").notNull(),
   direction: text("direction").notNull(), // buyer, merchant
@@ -35,7 +35,7 @@ export const comms = sqliteTable("comms", {
   sentAt: text("sent_at").notNull(),
 });
 
-export const disputes = sqliteTable("disputes", {
+export const disputes = pgTable("disputes", {
   paypalDisputeId: text("paypal_dispute_id").primaryKey(),
   captureId: text("capture_id"),
   orderId: text("order_id"),
@@ -51,7 +51,7 @@ export const disputes = sqliteTable("disputes", {
   updatedAt: text("updated_at").notNull(),
 });
 
-export const facts = sqliteTable("facts", {
+export const facts = pgTable("facts", {
   id: text("id").primaryKey(), // F-ord-001
   disputeId: text("dispute_id").notNull(),
   kind: text("kind").notNull(), // order, payment, tracking, delivery, policy, comms, dispute_msg
@@ -61,7 +61,7 @@ export const facts = sqliteTable("facts", {
   untrusted: integer("untrusted").notNull().default(0), // 0 or 1
 });
 
-export const analyses = sqliteTable("analyses", {
+export const analyses = pgTable("analyses", {
   id: text("id").primaryKey(),
   disputeId: text("dispute_id").notNull(),
   strengthScore: integer("strength_score").notNull(), // stored as 0-100 or minor unit
@@ -75,7 +75,7 @@ export const analyses = sqliteTable("analyses", {
   createdAt: text("created_at").notNull(),
 });
 
-export const drafts = sqliteTable("drafts", {
+export const drafts = pgTable("drafts", {
   id: text("id").primaryKey(),
   disputeId: text("dispute_id").notNull(),
   version: integer("version").notNull().default(1),
@@ -90,7 +90,7 @@ export const drafts = sqliteTable("drafts", {
   createdAt: text("created_at").notNull(),
 });
 
-export const actions = sqliteTable("actions", {
+export const actions = pgTable("actions", {
   id: text("id").primaryKey(),
   disputeId: text("dispute_id").notNull(),
   type: text("type").notNull(), // provide_evidence, accept_claim, refund
@@ -101,7 +101,7 @@ export const actions = sqliteTable("actions", {
   createdAt: text("created_at").notNull(),
 });
 
-export const auditLog = sqliteTable("audit_log", {
+export const auditLog = pgTable("audit_log", {
   id: text("id").primaryKey(),
   ts: text("ts").notNull(),
   actor: text("actor").notNull(), // agent, human, system, paypal
@@ -110,7 +110,7 @@ export const auditLog = sqliteTable("audit_log", {
   detailJson: text("detail_json"),
 });
 
-export const webhookEvents = sqliteTable("webhook_events", {
+export const webhookEvents = pgTable("webhook_events", {
   eventId: text("event_id").primaryKey(),
   eventType: text("event_type").notNull(),
   payloadJson: text("payload_json").notNull(),

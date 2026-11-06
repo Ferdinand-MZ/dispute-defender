@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
+import {
+  AI_MODEL_OPTIONS,
+  AI_MODEL_STORAGE_KEY,
+  OPERATOR_NAME_STORAGE_KEY,
+  WORKSPACE_PREFS_EVENT,
+} from "@/lib/ai-models";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogHeader,
@@ -18,6 +24,7 @@ import {
   Bot,
   Check,
   CircleAlert,
+  FileDown,
   Loader2,
   Pencil,
   RefreshCw,
@@ -181,6 +188,25 @@ export function CaseDetailView({
   const [agentBusy, setAgentBusy] = useState<null | "analyze" | "draft" | "save">(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftPayload | null>(null);
+  const [selectedAiModel, setSelectedAiModel] = useState<string>("gemini-2.5-flash");
+
+  useEffect(() => {
+    const syncPrefs = () => {
+      const savedModel = window.localStorage.getItem(AI_MODEL_STORAGE_KEY);
+      if (savedModel) setSelectedAiModel(savedModel);
+      const savedOperator = window.localStorage.getItem(OPERATOR_NAME_STORAGE_KEY);
+      if (savedOperator) setApproverName(savedOperator);
+    };
+    syncPrefs();
+    window.addEventListener(WORKSPACE_PREFS_EVENT, syncPrefs);
+    return () => window.removeEventListener(WORKSPACE_PREFS_EVENT, syncPrefs);
+  }, []);
+
+  function updateSelectedAiModel(modelId: string) {
+    setSelectedAiModel(modelId);
+    window.localStorage.setItem(AI_MODEL_STORAGE_KEY, modelId);
+    window.dispatchEvent(new CustomEvent(WORKSPACE_PREFS_EVENT));
+  }
 
   // Parse draft body JSON if present
   let parsedDraftBody: {
@@ -258,8 +284,8 @@ export function CaseDetailView({
     }
   }
 
-  const handleAnalyze = () => runAgentRequest("analyze", "POST", "analyze");
-  const handleDraft = () => runAgentRequest("draft", "POST", "draft");
+  const handleAnalyze = () => runAgentRequest("analyze", "POST", "analyze", { modelId: selectedAiModel });
+  const handleDraft = () => runAgentRequest("draft", "POST", "draft", { modelId: selectedAiModel });
   const handleSaveEdit = () =>
     editDraft && runAgentRequest("save", "PUT", "draft", { draft: editDraft, editedBy: approverName.trim() || undefined });
 
@@ -465,7 +491,7 @@ export function CaseDetailView({
       const res = await fetch(`/api/cases/${dispute.paypalDisputeId}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: askQuestion.trim() }),
+        body: JSON.stringify({ question: askQuestion.trim(), modelId: selectedAiModel }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -828,26 +854,57 @@ export function CaseDetailView({
               ) : undefined
             }
           >
-            {canWorkOnCase && !editDraft && (
+            {!editDraft && (canWorkOnCase || draft) && (
               <div className="mb-5 flex flex-wrap items-center gap-2">
-                <Button
-                  variant={draft ? "outline" : "default"}
-                  size="sm"
-                  onClick={handleDraft}
-                  disabled={agentBusy !== null}
-                >
-                  {agentBusy === "draft" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  )}
-                  {agentBusy === "draft" ? "Drafting and fact-checking…" : draft ? "Regenerate draft" : "Draft evidence"}
-                </Button>
-                {parsedDraftBody?.sections && (
-                  <Button variant="outline" size="sm" onClick={startEditing} disabled={agentBusy !== null}>
-                    <Pencil className="h-4 w-4" aria-hidden="true" />
-                    Edit text
-                  </Button>
+                {canWorkOnCase && (
+                  <>
+                    <Button
+                      variant={draft ? "outline" : "default"}
+                      size="sm"
+                      onClick={handleDraft}
+                      disabled={agentBusy !== null}
+                    >
+                      {agentBusy === "draft" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" aria-hidden="true" />
+                      )}
+                      {agentBusy === "draft" ? "Drafting and fact-checking…" : draft ? "Regenerate draft" : "Draft evidence"}
+                    </Button>
+                    <select
+                      aria-label="Select AI Model for drafting"
+                      value={selectedAiModel}
+                      onChange={(e) => updateSelectedAiModel(e.target.value)}
+                      disabled={agentBusy !== null}
+                      className="h-9 rounded-lg border border-input bg-card px-2.5 text-xs font-medium text-foreground focus:border-primary focus:outline-none"
+                    >
+                      {AI_MODEL_OPTIONS.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          Engine: {opt.label}
+                        </option>
+                      ))}
+                      {!AI_MODEL_OPTIONS.some((m) => m.id === selectedAiModel) && (
+                        <option value={selectedAiModel}>Engine: {selectedAiModel}</option>
+                      )}
+                    </select>
+                    {parsedDraftBody?.sections && (
+                      <Button variant="outline" size="sm" onClick={startEditing} disabled={agentBusy !== null}>
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
+                        Edit text
+                      </Button>
+                    )}
+                  </>
+                )}
+                {draft && groundingPassed && (
+                  <a
+                    href={`/api/cases/${dispute.paypalDisputeId}/packet`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    <FileDown className="h-4 w-4" aria-hidden="true" />
+                    Preview Evidence PDF
+                  </a>
                 )}
                 {draft && caseState === "APPROVED" && (
                   <p className="text-xs text-muted-foreground">Changing the draft withdraws your approval.</p>

@@ -11,9 +11,9 @@ export class AIProviderNotConfiguredError extends Error {
 }
 
 /**
- * Instantiate the configured AI model provider.
+ * Instantiate the configured AI model provider, optionally overriding the model ID per request.
  */
-export function getAIModel() {
+export function getAIModel(overrideModelId?: string) {
   if (!env.AI_API_KEY) {
     throw new AIProviderNotConfiguredError(
       `AI_API_KEY is not set. Please set AI_API_KEY in your environment or .env file.`
@@ -31,7 +31,8 @@ export function getAIModel() {
     apiKey: env.AI_API_KEY,
   });
 
-  return google(env.AI_MODEL);
+  const targetModel = overrideModelId?.trim() || env.AI_MODEL;
+  return google(targetModel);
 }
 
 /** True when an LLM can be called. Without it the agent falls back to rule-based text. */
@@ -59,21 +60,39 @@ export interface AgentModel {
   generate: StructuredGenerator;
 }
 
-/** The configured model, or null when no AI provider is set up. */
-export function defaultAgentModel(): AgentModel | null {
-  return isAiConfigured() ? { id: configuredModelId(), generate: generateStructured } : null;
+/**
+ * The configured model (or user-selected overrideModelId), or null when no AI provider is set up
+ * or when the user explicitly selects the deterministic `"rules"` engine.
+ */
+export function defaultAgentModel(overrideModelId?: string | null): AgentModel | null {
+  const cleaned = overrideModelId?.trim();
+  if (cleaned === "rules" || cleaned === "template") {
+    return null;
+  }
+  if (!isAiConfigured()) {
+    return null;
+  }
+  const modelId = cleaned || configuredModelId();
+  return {
+    id: modelId,
+    generate: <T extends z.ZodTypeAny>(options: GenerateStructuredOptions<T>) =>
+      generateStructured(options, modelId),
+  };
 }
 
 /**
  * Generate structured, schema-validated JSON output from the LLM.
  * Calls in analysis and drafting have NO tool execution capabilities.
  */
-export async function generateStructured<T extends z.ZodTypeAny>({
-  schema,
-  system,
-  prompt,
-}: GenerateStructuredOptions<T>): Promise<z.infer<T>> {
-  const model = getAIModel();
+export async function generateStructured<T extends z.ZodTypeAny>(
+  {
+    schema,
+    system,
+    prompt,
+  }: GenerateStructuredOptions<T>,
+  overrideModelId?: string
+): Promise<z.infer<T>> {
+  const model = getAIModel(overrideModelId);
 
   const response = await generateObject({
     model,

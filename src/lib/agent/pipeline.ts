@@ -37,13 +37,13 @@ export async function processDispute(disputeId: string, options: PipelineOptions
   const database = options.database ?? getDb();
   const model = options.model === undefined ? defaultAgentModel() : options.model;
 
-  const dispute = database.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)).all()[0];
+  const dispute = (await database.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)))[0];
   if (!dispute) throw new Error(`Dispute ${disputeId} not found`);
   if (!PROCESSABLE_STATES.includes(dispute.caseState as CaseState)) {
     return { disputeId, skipped: true, factCount: 0, analysis: null, draft: null };
   }
 
-  const builtFacts = rebuildFacts(disputeId, database);
+  const builtFacts = await rebuildFacts(disputeId, database);
   await logAudit({
     database,
     actor: "agent",

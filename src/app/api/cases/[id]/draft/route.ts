@@ -24,17 +24,27 @@ function failure(disputeId: string, err: unknown) {
   return NextResponse.json({ error: "The draft could not be saved. Try again." }, { status: 500 });
 }
 
+const GenerateDraftBodySchema = z
+  .object({
+    modelId: z.string().trim().min(1).max(80).optional(),
+  })
+  .optional();
+
 /** Writes a new evidence draft from the fact base. Any earlier approval no longer applies. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = verifyMerchantAuth(req);
   if (!auth.authenticated || !auth.user) return unauthorized(auth.error, auth.status);
+
+  const rawBody = await req.json().catch(() => undefined);
+  const parsedBody = GenerateDraftBodySchema.safeParse(rawBody);
+  const selectedModelId = parsedBody.success ? parsedBody.data?.modelId : undefined;
 
   try {
     const latest = (
       await db.select().from(analyses).where(eq(analyses.disputeId, params.id)).orderBy(desc(analyses.createdAt))
     )[0];
     const draft = await runDraft(params.id, {
-      model: defaultAgentModel(),
+      model: defaultAgentModel(selectedModelId),
       recommendation: latest?.recommendation ?? null,
     });
     return NextResponse.json({ success: true, draft });

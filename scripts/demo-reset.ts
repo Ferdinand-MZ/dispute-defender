@@ -1,45 +1,34 @@
-import { execSync } from "child_process";
-import fs from "fs";
-import path from "path";
+import { getPool, ensureDatabaseReady } from "../src/lib/db";
+import { seed } from "../src/lib/db/seed";
 
 async function main() {
-  console.log("🔄 Resetting DisputeDefender database for demo...");
+  console.log("🔄 Resetting DisputeDefender PostgreSQL database for demo...");
 
-  const dbPath = path.resolve(
-    process.cwd(),
-    process.env.DATABASE_URL?.replace("file:", "") || "./data/app.db"
-  );
-  const dbDir = path.dirname(dbPath);
+  const db = await ensureDatabaseReady();
+  const pool = getPool();
 
-  // If database files exist, remove them
-  const filesToRemove = [
-    dbPath,
-    `${dbPath}-journal`,
-    `${dbPath}-shm`,
-    `${dbPath}-wal`,
-  ];
+  console.log("Truncating existing tables...");
+  await pool.query(`
+    TRUNCATE TABLE
+      webhook_events,
+      audit_log,
+      actions,
+      drafts,
+      analyses,
+      facts,
+      disputes,
+      comms,
+      orders,
+      policies
+    RESTART IDENTITY CASCADE;
+  `);
 
-  for (const f of filesToRemove) {
-    if (fs.existsSync(f)) {
-      fs.unlinkSync(f);
-      console.log(`Deleted ${f}`);
-    }
-  }
+  await seed(db);
 
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true });
-  }
-
-  // Run schema push / initialization
-  console.log("Applying database schema via drizzle-kit push...");
-  execSync("pnpm exec drizzle-kit push --force", { stdio: "inherit" });
-
-  // Import the seed only now: importing it opens the DB, which must happen after the reset.
-  const { seed } = await import("../src/lib/db/seed");
-  await seed();
+  await pool.end();
 
   console.log("\n==========================================================");
-  console.log("🎉 DEMO RESET COMPLETE");
+  console.log("🎉 DEMO RESET COMPLETE (PostgreSQL)");
   console.log("==========================================================");
   console.log("Checklist before recording or demonstrating:");
   console.log("1. Scenario S1 (PP-D-1001): Earbuds - delivered, strong proof - FIGHT, grounded draft ready to approve.");

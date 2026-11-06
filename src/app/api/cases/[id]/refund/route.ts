@@ -11,8 +11,10 @@ import {
   isSandboxMode,
   assertSandboxCredentials,
   formatDemoSimulationResponse,
+  isLocalSeedOrSimulatedDispute,
   PayPalConfigError,
 } from "@/lib/mode";
+import { PayPalApiError } from "@/lib/paypal/client";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -158,20 +160,39 @@ export async function POST(
       }
 
       const stableRequestId = `ref_${captureId}_${disputeId}`;
-      const refundResult = await refundCapture({
-        captureId,
-        approvedBy,
-        amountMinor: dispute.amountMinor,
-        currency: dispute.currency,
-        noteToPayer: noteToPayer || "Dispute defender full refund",
-        requestId: stableRequestId,
-      });
+      try {
+        const refundResult = await refundCapture({
+          captureId,
+          approvedBy,
+          amountMinor: dispute.amountMinor,
+          currency: dispute.currency,
+          noteToPayer: noteToPayer || "Dispute defender full refund",
+          requestId: stableRequestId,
+        });
 
-      paypalResponse = {
-        mode: "sandbox",
-        simulated: false,
-        ...refundResult,
-      };
+        paypalResponse = {
+          mode: "sandbox",
+          simulated: false,
+          ...refundResult,
+        };
+      } catch (ppErr) {
+        if (
+          ppErr instanceof PayPalApiError &&
+          ppErr.status === 404 &&
+          isLocalSeedOrSimulatedDispute(dispute.rawJson)
+        ) {
+          paypalResponse = formatDemoSimulationResponse("refund", {
+            disputeId,
+            captureId,
+            amountMinor: dispute.amountMinor,
+            currency: dispute.currency,
+            paypalSandboxAuthVerified: true,
+            paypalDebugId: ppErr.debugId,
+          });
+        } else {
+          throw ppErr;
+        }
+      }
     }
 
     const nextState = transitionState(dispute.caseState as CaseState, "REFUNDED");
@@ -179,38 +200,36 @@ export async function POST(
     const actionId = `act_${Date.now()}_ref`;
 
     // 8. Update Database State
-    db.transaction((tx) => {
-      tx.update(disputes)
+    await db.transaction(async (tx) => {
+      await tx
+        .update(disputes)
         .set({
           caseState: nextState,
           paypalStatus: "RESOLVED",
           updatedAt: now,
         })
-        .where(eq(disputes.paypalDisputeId, disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, disputeId));
 
       if (linkedOrderRecord) {
-        tx.update(orders)
+        await tx
+          .update(orders)
           .set({
             status: "refunded",
             updatedAt: now,
           })
-          .where(eq(orders.id, linkedOrderRecord.id))
-          .run();
+          .where(eq(orders.id, linkedOrderRecord.id));
       }
 
-      tx.insert(actions)
-        .values({
-          id: actionId,
-          disputeId,
-          type: "refund",
-          payloadJson: JSON.stringify({ captureId, approvedBy, noteToPayer }),
-          paypalResponseJson: JSON.stringify(paypalResponse),
-          status: "REFUNDED",
-          approvedBy,
-          createdAt: now,
-        })
-        .run();
+      await tx.insert(actions).values({
+        id: actionId,
+        disputeId,
+        type: "refund",
+        payloadJson: JSON.stringify({ captureId, approvedBy, noteToPayer }),
+        paypalResponseJson: JSON.stringify(paypalResponse),
+        status: "REFUNDED",
+        approvedBy,
+        createdAt: now,
+      });
     });
 
     // 9. Log Immutable Audit Record

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { orders, disputes, auditLog, Order, Dispute } from "../db/schema";
+import { orders, disputes, Order, Dispute } from "../db/schema";
 import { eq, or } from "drizzle-orm";
 import { PayPalOrder, PayPalDispute } from "./types";
 import { toMinorUnits } from "../money";
@@ -8,7 +8,7 @@ import { canTransition, transitionState, CaseState } from "../agent/state";
 import { rebuildFacts } from "../agent/facts";
 
 /**
- * Safely upsert a PayPal Sandbox Order into the local SQLite database.
+ * Safely upsert a PayPal Sandbox Order into the local PostgreSQL database.
  * Deduplicates by paypalOrderId or existing order record.
  */
 export async function syncPayPalOrderToDb(paypalOrder: PayPalOrder): Promise<Order> {
@@ -115,7 +115,7 @@ export async function syncPayPalOrderToDb(paypalOrder: PayPalOrder): Promise<Ord
 }
 
 /**
- * Safely upsert a PayPal Dispute into the local SQLite database.
+ * Safely upsert a PayPal Dispute into the local PostgreSQL database.
  * Deduplicates by paypalDisputeId, links order by captureId, and registers facts.
  */
 export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dispute> {
@@ -131,23 +131,22 @@ export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dis
   let auditAction = "";
   let auditDetail: Record<string, unknown> = {};
 
-  const result = db.transaction((tx) => {
+  const result = await db.transaction(async (tx) => {
     // Attempt to link to an existing order in database
     let linkedOrderId: string | null = null;
     if (customId) {
-      const matchByCustom = tx.select().from(orders).where(eq(orders.id, customId)).all()[0];
+      const matchByCustom = (await tx.select().from(orders).where(eq(orders.id, customId)))[0];
       if (matchByCustom) linkedOrderId = matchByCustom.id;
     }
     if (!linkedOrderId && captureId) {
-      const matchByCapture = tx.select().from(orders).where(eq(orders.captureId, captureId)).all()[0];
+      const matchByCapture = (await tx.select().from(orders).where(eq(orders.captureId, captureId)))[0];
       if (matchByCapture) linkedOrderId = matchByCapture.id;
     }
 
-    const existingDisputes = tx
+    const existingDisputes = await tx
       .select()
       .from(disputes)
-      .where(eq(disputes.paypalDisputeId, dispute.dispute_id))
-      .all();
+      .where(eq(disputes.paypalDisputeId, dispute.dispute_id));
 
     const existing = existingDisputes[0];
 
@@ -160,7 +159,7 @@ export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dis
         }
       }
 
-      tx
+      await tx
         .update(disputes)
         .set({
           captureId: captureId || existing.captureId,
@@ -175,14 +174,13 @@ export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dis
           rawJson: JSON.stringify(dispute),
           updatedAt: now,
         })
-        .where(eq(disputes.paypalDisputeId, dispute.dispute_id))
-        .run();
+        .where(eq(disputes.paypalDisputeId, dispute.dispute_id));
 
       auditAction = "DISPUTE_UPDATED_FROM_PAYPAL";
       auditDetail = { paypalStatus: dispute.status, caseState: updatedCaseState };
     } else {
       // Insert new dispute
-      tx.insert(disputes).values({
+      await tx.insert(disputes).values({
         paypalDisputeId: dispute.dispute_id,
         captureId,
         orderId: linkedOrderId,
@@ -196,17 +194,17 @@ export async function syncPayPalDisputeToDb(dispute: PayPalDispute): Promise<Dis
         rawJson: JSON.stringify(dispute),
         createdAt: dispute.create_time || now,
         updatedAt: now,
-      }).run();
+      });
 
       auditAction = "DISPUTE_INSERTED_FROM_PAYPAL";
       auditDetail = { reason: dispute.reason, amountMinor, status: dispute.status };
     }
 
-    return tx.select().from(disputes).where(eq(disputes.paypalDisputeId, dispute.dispute_id)).all()[0];
+    return (await tx.select().from(disputes).where(eq(disputes.paypalDisputeId, dispute.dispute_id)))[0];
   });
 
   // Rebuild the fact base from the stored dispute (including buyer messages) and linked order.
-  rebuildFacts(dispute.dispute_id);
+  await rebuildFacts(dispute.dispute_id);
 
   if (auditAction) {
     await logAudit({

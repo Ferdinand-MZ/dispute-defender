@@ -81,8 +81,13 @@ export async function POST(req: NextRequest) {
       });
     } catch (dbErr: unknown) {
       // If error is unique constraint violation, duplicate event received -> return 200 fast
+      const errCode = (dbErr as { code?: string }).code;
       const errMsg = String((dbErr as Error).message || "");
-      if (errMsg.includes("UNIQUE constraint failed")) {
+      if (
+        errCode === "23505" ||
+        errMsg.includes("UNIQUE constraint failed") ||
+        errMsg.includes("duplicate key value violates unique constraint")
+      ) {
         return NextResponse.json({ message: "Duplicate event acknowledged" }, { status: 200 });
       }
       throw dbErr;

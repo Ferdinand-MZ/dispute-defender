@@ -12,7 +12,9 @@ export default defineConfig({
       PAYPAL_CLIENT_ID: "mock_test_client_id",
       PAYPAL_CLIENT_SECRET: "mock_test_client_secret",
       PAYPAL_WEBHOOK_ID: "mock_test_webhook_id",
-      DATABASE_URL: "file:./data/test.db",
+      DATABASE_URL:
+        process.env.TEST_DATABASE_URL ||
+        "postgresql://dispute:dispute_password@localhost:5433/dispute_defender_test",
     },
   },
   resolve: {

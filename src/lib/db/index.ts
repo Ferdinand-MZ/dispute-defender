@@ -1,54 +1,66 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { Pool } from "pg";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
 import { ensureTables } from "./init";
-import path from "path";
-import fs from "fs";
+import { DEFAULT_DATABASE_URL } from "../env";
 
-let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
-let _sqlite: Database.Database | null = null;
+export type AppDatabase = NodePgDatabase<typeof schema>;
 
-export function getDb() {
+let _db: AppDatabase | null = null;
+let _pool: Pool | null = null;
+let _initPromise: Promise<void> | null = null;
+
+export function getPool(): Pool {
+  if (_pool) return _pool;
+  const connectionString = process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
+  _pool = new Pool({
+    connectionString,
+    max: 10,
+  });
+  return _pool;
+}
+
+export function getDb(): AppDatabase {
   if (_db) return _db;
 
-  const dbUrl = process.env.DATABASE_URL?.replace("file:", "") || "./data/app.db";
-  const resolvedPath = path.resolve(process.cwd(), dbUrl);
+  const pool = getPool();
+  _db = drizzle(pool, { schema });
 
-  const dir = path.dirname(resolvedPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  if (!_initPromise) {
+    _initPromise = (async () => {
+      try {
+        await ensureTables(pool);
 
-  _sqlite = new Database(resolvedPath);
-  _sqlite.pragma("journal_mode = WAL");
-  _sqlite.pragma("foreign_keys = ON");
+        // Reseed on boot if DEMO_MODE is active and database has no disputes
+        const isDemo =
+          process.env.DEMO_MODE === "true" ||
+          process.env.DEMO_MODE === "1" ||
+          process.env.DEMO_MODE === undefined;
+        const isSeedScript = /(?:seed|demo-reset)\.ts$/.test(process.argv[1] ?? "");
 
-  ensureTables(_sqlite);
-
-  _db = drizzle(_sqlite, { schema });
-
-  // Reseed on boot if DEMO_MODE is active and database has no disputes (e.g. Render ephemeral filesystem)
-  const isDemo =
-    process.env.DEMO_MODE === "true" ||
-    process.env.DEMO_MODE === "1" ||
-    process.env.DEMO_MODE === undefined;
-  // The seed and demo-reset scripts seed explicitly; auto-seeding there would run the pipeline twice.
-  const isSeedScript = /(?:seed|demo-reset)\.ts$/.test(process.argv[1] ?? "");
-  if (isDemo && process.env.NODE_ENV !== "test" && !isSeedScript) {
-    try {
-      const row = _sqlite.prepare("SELECT count(*) as cnt FROM disputes").get() as { cnt: number } | undefined;
-      if (!row || row.cnt === 0) {
-        const { seed } = require("./seed");
-        seed(_db).catch((seedErr: unknown) => {
-          console.warn("[DEMO_MODE_RESEED_WARNING] Could not auto-seed demo data:", seedErr);
-        });
+        if (isDemo && process.env.NODE_ENV !== "test" && !isSeedScript) {
+          const res = await pool.query<{ cnt: string }>("SELECT count(*) as cnt FROM disputes");
+          const cnt = Number(res.rows[0]?.cnt ?? 0);
+          if (cnt === 0) {
+            const { seed } = await import("./seed");
+            await seed(_db!);
+          }
+        }
+      } catch (err) {
+        console.warn("[DB_INIT_WARNING] Could not auto-initialize or seed database:", (err as Error).message);
       }
-    } catch (seedErr) {
-      console.warn("[DEMO_MODE_RESEED_WARNING] Could not auto-seed demo data:", seedErr);
-    }
+    })();
   }
 
   return _db;
+}
+
+export async function ensureDatabaseReady(): Promise<AppDatabase> {
+  const database = getDb();
+  if (_initPromise) {
+    await _initPromise;
+  }
+  return database;
 }
 
 export const db = getDb();

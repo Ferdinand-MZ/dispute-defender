@@ -13,8 +13,10 @@ import {
   isSandboxMode,
   assertSandboxCredentials,
   formatDemoSimulationResponse,
+  isLocalSeedOrSimulatedDispute,
   PayPalConfigError,
 } from "@/lib/mode";
+import { PayPalApiError } from "@/lib/paypal/client";
 import { computeDraftApprovalHash } from "@/lib/agent/approval";
 import { z } from "zod";
 
@@ -275,23 +277,44 @@ export async function POST(
       }
 
       const stableRequestId = `ev_submit_${disputeId}`;
-      await provideDisputeEvidence({
-        disputeId,
-        evidencePayload,
-        approvedBy,
-        evidenceFile: evidencePacket,
-        requestId: stableRequestId,
-      });
+      try {
+        await provideDisputeEvidence({
+          disputeId,
+          evidencePayload,
+          approvedBy,
+          evidenceFile: evidencePacket,
+          requestId: stableRequestId,
+        });
 
-      paypalResponse = {
-        mode: "sandbox",
-        simulated: false,
-        status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
-        endpoint: `/v1/customer/disputes/${disputeId}/provide-evidence`,
-        requestId: stableRequestId,
-        attachedPdf: evidencePacket.filename,
-        pdfSizeBytes: evidencePacket.buffer.byteLength,
-      };
+        paypalResponse = {
+          mode: "sandbox",
+          simulated: false,
+          status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
+          endpoint: `/v1/customer/disputes/${disputeId}/provide-evidence`,
+          requestId: stableRequestId,
+          attachedPdf: evidencePacket.filename,
+          pdfSizeBytes: evidencePacket.buffer.byteLength,
+        };
+      } catch (ppErr) {
+        if (
+          ppErr instanceof PayPalApiError &&
+          ppErr.status === 404 &&
+          isLocalSeedOrSimulatedDispute(dispute.rawJson)
+        ) {
+          paypalResponse = formatDemoSimulationResponse("provide_evidence", {
+            disputeId,
+            evidenceType: evidencePayload.evidences[0]?.evidence_type,
+            attachedPdf: evidencePacket.filename,
+            pdfSizeBytes: evidencePacket.buffer.byteLength,
+            paypalSandboxAuthVerified: true,
+            paypalDebugId: ppErr.debugId,
+            notice:
+              "PayPal Sandbox OAuth verified; completed locally because this dispute ID is a seeded demo scenario.",
+          });
+        } else {
+          throw ppErr;
+        }
+      }
     }
 
     // 10. Verify and Execute State Transition
@@ -306,36 +329,34 @@ export async function POST(
     const now = new Date().toISOString();
     const actionId = `act_${Date.now()}_sub`;
 
-    db.transaction((tx) => {
-      tx.update(disputes)
+    await db.transaction(async (tx) => {
+      await tx
+        .update(disputes)
         .set({
           caseState: nextState,
           paypalStatus: "UNDER_REVIEW",
           updatedAt: now,
         })
-        .where(eq(disputes.paypalDisputeId, disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, disputeId));
 
-      tx.update(drafts)
+      await tx
+        .update(drafts)
         .set({
           status: "submitted",
           pdfPath: evidencePacket.filename,
         })
-        .where(eq(drafts.id, draft.id))
-        .run();
+        .where(eq(drafts.id, draft.id));
 
-      tx.insert(actions)
-        .values({
-          id: actionId,
-          disputeId,
-          type: "provide_evidence",
-          payloadJson: JSON.stringify(evidencePayload),
-          paypalResponseJson: JSON.stringify(paypalResponse),
-          status: "SUBMITTED",
-          approvedBy,
-          createdAt: now,
-        })
-        .run();
+      await tx.insert(actions).values({
+        id: actionId,
+        disputeId,
+        type: "provide_evidence",
+        payloadJson: JSON.stringify(evidencePayload),
+        paypalResponseJson: JSON.stringify(paypalResponse),
+        status: "SUBMITTED",
+        approvedBy,
+        createdAt: now,
+      });
     });
 
     // 11. Log Immutable Audit Record

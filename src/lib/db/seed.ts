@@ -1,10 +1,8 @@
-// ./schema must load before ./index: getDb() auto-seeds while ./index is still loading,
-// so it passes its instance explicitly instead of relying on the circular import.
 import { policies, orders, comms, disputes, auditLog } from "./schema";
-import { db as defaultDb } from "./index";
+import { db as defaultDb, ensureDatabaseReady } from "./index";
 
 export async function seed(db = defaultDb) {
-  console.log("🌱 Seeding DisputeDefender database...");
+  console.log("🌱 Seeding DisputeDefender PostgreSQL database...");
 
   // 1. Store Policies
   const policyRecords = [
@@ -35,7 +33,7 @@ export async function seed(db = defaultDb) {
   ];
 
   for (const pol of policyRecords) {
-    db.insert(policies).values(pol).onConflictDoNothing().run();
+    await db.insert(policies).values(pol).onConflictDoNothing();
   }
 
   // 2. Demo Orders (Scenarios S1 - S4)
@@ -155,7 +153,7 @@ export async function seed(db = defaultDb) {
   ];
 
   for (const o of demoOrders) {
-    db.insert(orders).values(o).onConflictDoNothing().run();
+    await db.insert(orders).values(o).onConflictDoNothing();
   }
 
   // 3. Demo Communications
@@ -184,7 +182,7 @@ export async function seed(db = defaultDb) {
   ];
 
   for (const c of demoComms) {
-    db.insert(comms).values(c).onConflictDoNothing().run();
+    await db.insert(comms).values(c).onConflictDoNothing();
   }
 
   // 4. Demo Disputes
@@ -252,16 +250,16 @@ export async function seed(db = defaultDb) {
   ];
 
   for (const d of demoDisputes) {
-    db.insert(disputes).values(d).onConflictDoNothing().run();
+    await db.insert(disputes).values(d).onConflictDoNothing();
   }
 
   // 5. Run the real agent pipeline on every demo dispute: facts, analysis, and a draft when the
   // recommendation is to fight. The rule-based path keeps the demo reproducible and offline;
   // "Regenerate draft" on the case page uses the configured model.
-  // Loaded lazily: this module is required by getDb() while ./index is still initializing.
   const { processDispute } = await import("../agent/pipeline");
   for (const d of demoDisputes) {
-    db.insert(auditLog)
+    await db
+      .insert(auditLog)
       .values({
         id: `AUD-${d.paypalDisputeId}-created`,
         ts: d.createdAt,
@@ -270,8 +268,7 @@ export async function seed(db = defaultDb) {
         action: "CUSTOMER.DISPUTE.CREATED",
         detailJson: JSON.stringify({ reason: d.reason, amountMinor: d.amountMinor, currency: d.currency }),
       })
-      .onConflictDoNothing()
-      .run();
+      .onConflictDoNothing();
     await processDispute(d.paypalDisputeId, { database: db, model: null, trigger: "seed" });
   }
 
@@ -279,7 +276,8 @@ export async function seed(db = defaultDb) {
 }
 
 if (process.argv[1]?.endsWith("seed.ts")) {
-  seed()
+  ensureDatabaseReady()
+    .then((db) => seed(db))
     .then(() => process.exit(0))
     .catch((err) => {
       console.error("❌ Seed failed:", err);

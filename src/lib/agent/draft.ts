@@ -176,16 +176,17 @@ ${errors.map((e) => `- ${e.path}: ${e.message}`).join("\n")}`;
   return { payload: payload as DraftPayload, errors, attempts: 2 };
 }
 
-function latestDraft(disputeId: string, database: Database): Draft | undefined {
-  return database
-    .select()
-    .from(drafts)
-    .where(eq(drafts.disputeId, disputeId))
-    .orderBy(desc(drafts.version))
-    .all()[0];
+async function latestDraft(disputeId: string, database: Database): Promise<Draft | undefined> {
+  return (
+    await database
+      .select()
+      .from(drafts)
+      .where(eq(drafts.disputeId, disputeId))
+      .orderBy(desc(drafts.version))
+  )[0];
 }
 
-function storeDraft(
+async function storeDraft(
   database: Database,
   params: {
     disputeId: string;
@@ -196,8 +197,8 @@ function storeDraft(
     evidenceType: string;
     author: string;
   }
-): Draft {
-  const previous = latestDraft(params.disputeId, database);
+): Promise<Draft> {
+  const previous = await latestDraft(params.disputeId, database);
   const version = (previous?.version ?? 0) + 1;
   const now = new Date().toISOString();
   const row: Draft = {
@@ -217,24 +218,24 @@ function storeDraft(
 
   // A new draft always replaces any earlier approval: APPROVED moves back to DRAFTED.
   const moveToDrafted = params.currentState !== "DRAFTED" && canTransition(params.currentState, "DRAFTED");
-  database.transaction((tx) => {
-    tx.insert(drafts).values(row).run();
+  await database.transaction(async (tx) => {
+    await tx.insert(drafts).values(row);
     if (moveToDrafted) {
-      tx.update(disputes)
+      await tx
+        .update(disputes)
         .set({ caseState: "DRAFTED", updatedAt: now })
-        .where(eq(disputes.paypalDisputeId, params.disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, params.disputeId));
     }
   });
   return row;
 }
 
-function loadDraftContext(disputeId: string, database: Database) {
-  const dispute = database.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)).all()[0];
+async function loadDraftContext(disputeId: string, database: Database) {
+  const dispute = (await database.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)))[0];
   if (!dispute) throw new Error(`Dispute ${disputeId} not found`);
   const state = dispute.caseState as CaseState;
   if (!DRAFTABLE_STATES.includes(state)) throw new DraftNotAllowedError(state);
-  const facts = database.select().from(factsTable).where(eq(factsTable.disputeId, disputeId)).all();
+  const facts = await database.select().from(factsTable).where(eq(factsTable.disputeId, disputeId));
   return { dispute, state, facts };
 }
 
@@ -247,7 +248,7 @@ export interface RunDraftOptions {
 /** Writes a new draft (model when available, template otherwise), validates it, and stores it. */
 export async function runDraft(disputeId: string, options: RunDraftOptions = {}): Promise<Draft> {
   const database = options.database ?? getDb();
-  const { dispute, state, facts } = loadDraftContext(disputeId, database);
+  const { dispute, state, facts } = await loadDraftContext(disputeId, database);
 
   let payload: DraftPayload;
   let errors: GroundingError[];
@@ -275,7 +276,7 @@ export async function runDraft(disputeId: string, options: RunDraftOptions = {})
     author = TEMPLATE_AUTHOR;
   }
 
-  const row = storeDraft(database, {
+  const row = await storeDraft(database, {
     disputeId,
     currentState: state,
     payload,
@@ -310,11 +311,11 @@ export async function saveEditedDraft(
   editedBy: string,
   database: Database = getDb()
 ): Promise<Draft> {
-  const { dispute, state, facts } = loadDraftContext(disputeId, database);
+  const { dispute, state, facts } = await loadDraftContext(disputeId, database);
   const errors = validateGrounding(payload, facts).errors;
-  const previous = latestDraft(disputeId, database);
+  const previous = await latestDraft(disputeId, database);
 
-  const row = storeDraft(database, {
+  const row = await storeDraft(database, {
     disputeId,
     currentState: state,
     payload,

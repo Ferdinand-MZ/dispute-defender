@@ -96,27 +96,26 @@ vi.mock("@/lib/db", () => ({
         },
       }),
     }),
-    transaction: (cb: any) => {
+    transaction: async (cb: any) => {
       const tx = {
+        delete: () => ({
+          where: async () => {},
+        }),
         update: () => ({
           set: (updates: any) => ({
-            where: () => ({
-              run: () => {
-                const current = mockDisputeStore.get("PP-D-SEC-01") || {};
-                mockDisputeStore.set("PP-D-SEC-01", { ...current, ...updates });
-              },
-            }),
-          }),
-        }),
-        insert: () => ({
-          values: (row: any) => ({
-            run: () => {
-              mockActionsList.push(row);
+            where: async () => {
+              const current = mockDisputeStore.get("PP-D-SEC-01") || {};
+              mockDisputeStore.set("PP-D-SEC-01", { ...current, ...updates });
             },
           }),
         }),
+        insert: () => ({
+          values: async (row: any) => {
+            mockActionsList.push(row);
+          },
+        }),
       };
-      return cb(tx);
+      return await cb(tx);
     },
     update: () => ({
       set: (updates: any) => ({

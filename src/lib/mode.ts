@@ -69,3 +69,17 @@ export function formatDemoSimulationResponse(actionType: string, detail?: Record
     ...detail,
   };
 }
+
+/**
+ * Checks whether a dispute record originated from local demo seed (`mock: true`)
+ * or the local scenario simulator (`simulated: true`), which does not exist on PayPal's servers.
+ */
+export function isLocalSeedOrSimulatedDispute(rawJson: string | null | undefined): boolean {
+  if (!rawJson) return false;
+  try {
+    const parsed = JSON.parse(rawJson) as { mock?: boolean; simulated?: boolean };
+    return Boolean(parsed.mock || parsed.simulated);
+  } catch {
+    return false;
+  }
+}

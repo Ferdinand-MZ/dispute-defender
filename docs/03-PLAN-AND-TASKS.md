@@ -156,19 +156,19 @@ Last checked: Nov 5, 2026 (after the agent pipeline work on branch `feat/agent-p
   - `POST /api/admin/simulate/adjudicate` resolves a dispute (`SELLER_FAVOR` or `BUYER_FAVOR`).
   - `POST /api/admin/simulate/dispute` loads a preset scenario (S1 to S4) or a custom dispute.
   - `/admin/simulate` page with interactive controls.
-- **T21 (Deadline cron):** `POST /api/cron/deadlines` protected by `CRON_SECRET`, scheduled every 15 minutes in `render.yaml`.
+- **T20 (PDF evidence packet):** `src/lib/evidence/packet-pdf.ts` generates a cited PDF evidence dossier with `pdf-lib`, attaches it to `provide-evidence` on submission, and serves a live preview at `GET /api/cases/[id]/packet`.
+- **T21 (Deadline cron & polling fallback):** `POST /api/cron/deadlines` protected by `CRON_SECRET`, polls PayPal Sandbox disputes as a webhook fallback and marks overdue cases `EXPIRED`.
 - **T23 (Dashboard):** `/` shows cases needing a decision, cases in progress, and charts.
-- **T27 (Demo reset):** `pnpm run demo:reset` reseeds scenarios S1 to S4.
+- **T27 (Demo reset):** `pnpm run demo:reset` reseeds scenarios S1 to S4 in PostgreSQL.
+- **T28 (End-to-end tests):** Playwright E2E spec in `tests-e2e/dispute-flow.spec.ts`.
 - **Read-only AI assistant:** `POST /api/cases/[id]/ask` answers merchant questions with `@paypal/agent-toolkit` read-only tools (`list_disputes`, `get_dispute`, `get_shipment_tracking`).
 
 - **T10 (Facts builder):** `src/lib/agent/facts.ts` builds stable, sourced facts (order, payment, address, tracking, delivery, policies, messages) and marks buyer text untrusted. Used by dispute sync, the pipeline, and the analyze route.
 - **T14, T15, T16 (LLM, draft + grounding, analysis):** `analyze.ts` (deterministic score and recommendation, LLM rationale with no numbers), `draft.ts` (LLM draft, grounding validation, one retry with the errors, rule-based fallback), `pipeline.ts` (facts -> analysis -> draft when FIGHT). Wired into the webhook (background), the simulator, and the seed. New routes: `POST /api/cases/[id]/analyze`, `POST` and `PUT /api/cases/[id]/draft`. `decision.ts` now refunds weak cases (low and very low bands). Verified against Gemini (`gemini-3.6-flash`): the S1 draft passed the fact check on the first attempt, and the S4 draft ignored the injected buyer instruction.
-- **T17 (Case detail UI, agent controls):** analyze, regenerate draft, and edit-with-fact-check on the case page; the writer of each draft and rationale is shown.
+- **T17 (Case detail UI, agent controls):** analyze, regenerate draft, edit-with-fact-check, and PDF preview on the case page; the writer of each draft and rationale is shown.
 - **T24 (Prompt-injection defense):** S4 buyer text is untrusted, excluded from evidence signals, rejected if cited (`UNTRUSTED_REF`), and covered by tests.
 
-### Not started
-- **T20 (PDF evidence packet):** `pdf-lib` is a dependency but is not used yet.
-- **T28 end-to-end tests:** `playwright.config.ts` exists, but there are no specs.
+### Optional / Nice items
 - **T29, T35 (Nice items).**
 
 ### Quality gate results

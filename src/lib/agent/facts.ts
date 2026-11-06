@@ -262,17 +262,20 @@ export function summarizeEvidence(input: FactSourceInput): FactSummary {
 export type LoadedFactSources = FactSourceInput & { dispute: Dispute };
 
 /** Loads every record a dispute's fact base is built from. */
-export function loadFactSources(disputeId: string, database: Database = getDb()): LoadedFactSources | null {
-  const dispute = database.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)).all()[0];
+export async function loadFactSources(
+  disputeId: string,
+  database: Database = getDb()
+): Promise<LoadedFactSources | null> {
+  const dispute = (await database.select().from(disputes).where(eq(disputes.paypalDisputeId, disputeId)))[0];
   if (!dispute) return null;
   const order = dispute.orderId
-    ? database.select().from(orders).where(eq(orders.id, dispute.orderId)).all()[0] ?? null
+    ? (await database.select().from(orders).where(eq(orders.id, dispute.orderId)))[0] ?? null
     : null;
   return {
     dispute,
     order,
-    policies: database.select().from(policies).all(),
-    comms: order ? database.select().from(comms).where(eq(comms.orderId, order.id)).all() : [],
+    policies: await database.select().from(policies),
+    comms: order ? await database.select().from(comms).where(eq(comms.orderId, order.id)) : [],
     disputeMessages: disputeMessagesFromRaw(dispute.rawJson),
   };
 }
@@ -281,14 +284,14 @@ export function loadFactSources(disputeId: string, database: Database = getDb())
  * Rebuilds and stores the fact base for a dispute. IDs are stable, so drafts that cite
  * a fact keep pointing at it; facts whose source record disappeared are removed.
  */
-export function rebuildFacts(disputeId: string, database: Database = getDb()): NewFact[] {
-  const sources = loadFactSources(disputeId, database);
+export async function rebuildFacts(disputeId: string, database: Database = getDb()): Promise<NewFact[]> {
+  const sources = await loadFactSources(disputeId, database);
   if (!sources) return [];
   const built = buildFacts(sources);
-  database.transaction((tx) => {
-    tx.delete(facts).where(eq(facts.disputeId, disputeId)).run();
+  await database.transaction(async (tx) => {
+    await tx.delete(facts).where(eq(facts.disputeId, disputeId));
     for (const fact of built) {
-      tx.insert(facts).values(fact).run();
+      await tx.insert(facts).values(fact);
     }
   });
   return built;

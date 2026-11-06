@@ -4,13 +4,14 @@ import { sql } from "drizzle-orm";
 
 export async function GET() {
   try {
-    // Verify SQLite connection
-    db.run(sql`SELECT 1`);
+    // Verify PostgreSQL connection
+    await db.execute(sql`SELECT 1`);
 
     return NextResponse.json(
       {
         status: "ok",
         app: "DisputeDefender",
+        database: "postgresql",
         environment: "sandbox",
         timestamp: new Date().toISOString(),
       },

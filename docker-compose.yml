@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dispute-defender-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dispute
+      POSTGRES_PASSWORD: dispute_password
+      POSTGRES_DB: dispute_defender
+    ports:
+      - "5433:5432"
+    volumes:
+      - dispute_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init-postgres.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dispute -d dispute_defender"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  dispute_pgdata:

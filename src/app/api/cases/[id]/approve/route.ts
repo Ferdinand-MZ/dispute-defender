@@ -124,41 +124,39 @@ export async function POST(
     const actionId = `act_${Date.now()}_app`;
 
     // 8. Update State & Record Database-Backed Approval Record
-    db.transaction((tx) => {
-      tx.update(disputes)
+    await db.transaction(async (tx) => {
+      await tx
+        .update(disputes)
         .set({
           caseState: nextState,
           updatedAt: now,
         })
-        .where(eq(disputes.paypalDisputeId, disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, disputeId));
 
-      tx.update(drafts)
+      await tx
+        .update(drafts)
         .set({
           status: "approved",
         })
-        .where(eq(drafts.id, draft.id))
-        .run();
+        .where(eq(drafts.id, draft.id));
 
-      tx.insert(actions)
-        .values({
-          id: actionId,
+      await tx.insert(actions).values({
+        id: actionId,
+        disputeId,
+        type: "approve",
+        payloadJson: JSON.stringify({
+          draftId: draft.id,
           disputeId,
-          type: "approve",
-          payloadJson: JSON.stringify({
-            draftId: draft.id,
-            disputeId,
-            approvalHash,
-            approvedBy,
-            merchantId: auth.user?.merchantId,
-            approvedAt: now,
-          }),
-          paypalResponseJson: null,
-          status: "APPROVED",
+          approvalHash,
           approvedBy,
-          createdAt: now,
-        })
-        .run();
+          merchantId: auth.user?.merchantId,
+          approvedAt: now,
+        }),
+        paypalResponseJson: null,
+        status: "APPROVED",
+        approvedBy,
+        createdAt: now,
+      });
     });
 
     // 9. Append Immutable Audit Record

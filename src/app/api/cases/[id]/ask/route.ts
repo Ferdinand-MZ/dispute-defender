@@ -10,6 +10,7 @@ import { z } from "zod";
 
 const AskSchema = z.object({
   question: z.string().min(1),
+  modelId: z.string().trim().min(1).max(80).optional(),
 });
 
 export async function POST(
@@ -20,7 +21,7 @@ export async function POST(
 
   try {
     const body = await req.json();
-    const { question } = AskSchema.parse(body);
+    const { question, modelId } = AskSchema.parse(body);
 
     const disputeRows = await db
       .select()
@@ -37,8 +38,8 @@ export async function POST(
       ? (await db.select().from(orders).where(eq(orders.id, dispute.orderId)))[0]
       : null;
 
-    // Check if AI API is configured
-    if (!env.AI_API_KEY) {
+    // Check if AI API is configured or if user explicitly requested deterministic rules mode
+    if (!env.AI_API_KEY || modelId === "rules") {
       // Fallback response based on known dispute facts
       const factsSummary = caseFacts.map((f) => `• [${f.kind}] ${f.label}: ${f.value}`).join("\n");
       const orderSummary = linkedOrder
@@ -46,18 +47,18 @@ export async function POST(
         : "No linked order.";
 
       return NextResponse.json({
-        answer: `Case ${disputeId} is currently in state '${dispute.caseState}' for reason ${dispute.reason}. Disputed amount: ${dispute.amountMinor / 100} ${dispute.currency}.\n\nKnown Facts:\n${factsSummary}\n\n${orderSummary}\n\n(AI_API_KEY is not configured; answering from local database fact base.)`,
+        answer: `Case ${disputeId} is currently in state '${dispute.caseState}' for reason ${dispute.reason}. Disputed amount: ${(dispute.amountMinor / 100).toFixed(2)} ${dispute.currency}.\n\nKnown Facts:\n${factsSummary}\n\n${orderSummary}\n\n(${modelId === "rules" ? "Rule-Based deterministic mode selected" : "AI_API_KEY is not configured"}; answering from local database fact base.)`,
         toolsUsed: ["database_fact_base"],
       });
     }
 
-    const model = getAIModel();
+    const model = getAIModel(modelId);
     const readTools = getPayPalReadOnlyTools();
 
     const systemPrompt = `You are DisputeDefender's read-only investigative AI assistant for PayPal merchants.
 You have read-only tools from @paypal/agent-toolkit: list_disputes, get_dispute, and get_shipment_tracking.
 You must never attempt or propose write actions or payments.
-Current case in focus: Dispute ID: ${disputeId}, Reason: ${dispute.reason}, Status: ${dispute.paypalStatus}, Amount: ${dispute.amountMinor / 100} ${dispute.currency}.
+Current case in focus: Dispute ID: ${disputeId}, Reason: ${dispute.reason}, Status: ${dispute.paypalStatus}, Amount: ${(dispute.amountMinor / 100).toFixed(2)} ${dispute.currency}.
 Available facts in database:
 ${caseFacts.map((f) => `[${f.id}] ${f.label}: ${f.value} (untrusted=${f.untrusted})`).join("\n")}
 Answer the merchant's question factually, concisely, and cite evidence.`;
@@ -84,6 +85,7 @@ Answer the merchant's question factually, concisely, and cite evidence.`;
     return NextResponse.json({
       answer: text,
       toolsUsed,
+      modelUsed: modelId || env.AI_MODEL,
     });
   } catch (err) {
     console.error("[ASK_CASE_ERROR]", err);

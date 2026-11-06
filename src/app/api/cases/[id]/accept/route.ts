@@ -11,8 +11,10 @@ import {
   isSandboxMode,
   assertSandboxCredentials,
   formatDemoSimulationResponse,
+  isLocalSeedOrSimulatedDispute,
   PayPalConfigError,
 } from "@/lib/mode";
+import { PayPalApiError } from "@/lib/paypal/client";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -123,18 +125,35 @@ export async function POST(
         throw configErr;
       }
 
-      await acceptSandboxDisputeClaim(
-        dispute.paypalDisputeId,
-        approvedBy,
-        note || "Accepting claim in accordance with store policy."
-      );
+      try {
+        await acceptSandboxDisputeClaim(
+          dispute.paypalDisputeId,
+          approvedBy,
+          note || "Accepting claim in accordance with store policy."
+        );
 
-      paypalResponse = {
-        mode: "sandbox",
-        simulated: false,
-        status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
-        endpoint: `/v1/customer/disputes/${disputeId}/accept-claim`,
-      };
+        paypalResponse = {
+          mode: "sandbox",
+          simulated: false,
+          status: "TRANSMITTED_TO_PAYPAL_SANDBOX",
+          endpoint: `/v1/customer/disputes/${disputeId}/accept-claim`,
+        };
+      } catch (ppErr) {
+        if (
+          ppErr instanceof PayPalApiError &&
+          ppErr.status === 404 &&
+          isLocalSeedOrSimulatedDispute(dispute.rawJson)
+        ) {
+          paypalResponse = formatDemoSimulationResponse("accept_claim", {
+            disputeId,
+            note: note || "Accepting claim in accordance with store policy.",
+            paypalSandboxAuthVerified: true,
+            paypalDebugId: ppErr.debugId,
+          });
+        } else {
+          throw ppErr;
+        }
+      }
     }
 
     const nextState = transitionState(dispute.caseState as CaseState, "ACCEPTED");
@@ -142,28 +161,26 @@ export async function POST(
     const actionId = `act_${Date.now()}_acc`;
 
     // 6. Update Database
-    db.transaction((tx) => {
-      tx.update(disputes)
+    await db.transaction(async (tx) => {
+      await tx
+        .update(disputes)
         .set({
           caseState: nextState,
           paypalStatus: "RESOLVED",
           updatedAt: now,
         })
-        .where(eq(disputes.paypalDisputeId, disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, disputeId));
 
-      tx.insert(actions)
-        .values({
-          id: actionId,
-          disputeId,
-          type: "accept_claim",
-          payloadJson: JSON.stringify({ approvedBy, note }),
-          paypalResponseJson: JSON.stringify(paypalResponse),
-          status: "ACCEPTED",
-          approvedBy,
-          createdAt: now,
-        })
-        .run();
+      await tx.insert(actions).values({
+        id: actionId,
+        disputeId,
+        type: "accept_claim",
+        payloadJson: JSON.stringify({ approvedBy, note }),
+        paypalResponseJson: JSON.stringify(paypalResponse),
+        status: "ACCEPTED",
+        approvedBy,
+        createdAt: now,
+      });
     });
 
     // 7. Append Audit Record

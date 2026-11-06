@@ -101,7 +101,7 @@ export interface RunAnalysisOptions {
 /** Runs and stores an analysis. Moves a NEW case to ANALYZED; other states are left alone. */
 export async function runAnalysis(disputeId: string, options: RunAnalysisOptions = {}): Promise<Analysis> {
   const database = options.database ?? getDb();
-  const sources = loadFactSources(disputeId, database);
+  const sources = await loadFactSources(disputeId, database);
   if (!sources) throw new Error(`Dispute ${disputeId} not found`);
 
   const computed = computeAnalysis(sources);
@@ -140,13 +140,13 @@ export async function runAnalysis(disputeId: string, options: RunAnalysisOptions
   const moveToAnalyzed =
     (currentState === "NEW" || currentState === "NEEDS_ATTENTION") && canTransition(currentState, "ANALYZED");
 
-  database.transaction((tx) => {
-    tx.insert(analyses).values(row).run();
+  await database.transaction(async (tx) => {
+    await tx.insert(analyses).values(row);
     if (moveToAnalyzed) {
-      tx.update(disputes)
+      await tx
+        .update(disputes)
         .set({ caseState: "ANALYZED", updatedAt: now })
-        .where(eq(disputes.paypalDisputeId, disputeId))
-        .run();
+        .where(eq(disputes.paypalDisputeId, disputeId));
     }
   });
 

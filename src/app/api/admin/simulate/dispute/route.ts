@@ -162,10 +162,10 @@ export async function POST(req: NextRequest) {
     }
 
     // A simulated dispute starts fresh: earlier analyses, drafts, and actions belong to the old run.
-    db.transaction((tx) => {
-      tx.delete(analyses).where(eq(analyses.disputeId, targetDisputeId)).run();
-      tx.delete(drafts).where(eq(drafts.disputeId, targetDisputeId)).run();
-      tx.delete(actions).where(eq(actions.disputeId, targetDisputeId)).run();
+    await db.transaction(async (tx) => {
+      await tx.delete(analyses).where(eq(analyses.disputeId, targetDisputeId));
+      await tx.delete(drafts).where(eq(drafts.disputeId, targetDisputeId));
+      await tx.delete(actions).where(eq(actions.disputeId, targetDisputeId));
     });
 
     await logAudit({

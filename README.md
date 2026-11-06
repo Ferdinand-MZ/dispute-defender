@@ -38,19 +38,19 @@ When a customer opens a PayPal dispute, a small merchant has a hard deadline and
 
 Being explicit about what is wired end to end today:
 
-- **Working end to end:** webhook intake with signature verification and dedupe, dispute sync, the agent pipeline (facts, analysis, recommendation, grounded draft) for every new dispute, re-run analysis, regenerate draft, merchant edits with a second fact check, grounding-gated approval, evidence submission, accept-claim and refund actions behind approval, sandbox simulator (create dispute, adjudicate), deadline cron, audit log, and the read-only "Ask" assistant.
-- **Tested:** unit and route tests (Vitest), including the pipeline against a real SQLite database with a fake model that invents tracking numbers, dates, and amounts, cites buyer text, or fails outright.
-- **Not implemented:** PDF evidence packet (planned with `pdf-lib`), end-to-end browser test specs (a Playwright config exists but there are no specs yet).
+- **Working end to end:** webhook intake with signature verification and dedupe, dispute sync, the agent pipeline (facts, analysis, recommendation, grounded draft) for every new dispute, re-run analysis, regenerate draft, merchant edits with a second fact check, grounding-gated approval, evidence submission with attached PDF evidence packet (`pdf-lib`), accept-claim and refund actions behind approval, sandbox simulator (create dispute, adjudicate), deadline cron with dispute polling fallback, audit log, and the read-only "Ask" assistant.
+- **Tested:** unit and route tests (Vitest) against PostgreSQL, including the pipeline with a fake model that invents tracking numbers, dates, and amounts, cites buyer text, or fails outright, plus Playwright E2E specs (`tests-e2e/`).
 
 ## Tech stack
 
 - Next.js 14 (App Router), React 18, TypeScript in strict mode
 - Tailwind CSS, shadcn/ui primitives, Lucide icons
 - AG Grid Community (`ag-grid-react`) for the case queue, AG Charts for dashboard charts
-- SQLite via `better-sqlite3`, Drizzle ORM and Drizzle Kit
+- PostgreSQL (via Docker Compose) + `pg`, Drizzle ORM and Drizzle Kit
 - Vercel AI SDK (`ai`) with `@ai-sdk/google`
 - PayPal REST API, sandbox only, through a thin fetch-based client in `src/lib/paypal/`
-- Vitest for unit and route tests
+- `pdf-lib` for generating self-contained PDF evidence packets
+- Vitest for unit and route tests, Playwright for E2E browser tests
 - Render for hosting (web service plus a cron job, see `render.yaml`)
 
 ## Local setup
@@ -59,6 +59,7 @@ Being explicit about what is wired end to end today:
 
 - Node.js 20 or newer
 - pnpm
+- Docker & Docker Compose (for PostgreSQL)
 
 ### Install
 
@@ -66,6 +67,7 @@ Being explicit about what is wired end to end today:
 git clone https://github.com/Ferdinand-MZ/dispute-defender.git
 cd dispute-defender
 pnpm install
+docker compose up -d
 ```
 
 ### Configure
@@ -81,7 +83,7 @@ cp .env.example .env
 | `PAYPAL_WEBHOOK_ID` | ID of the webhook registered for dispute events, used for signature verification |
 | `PAYPAL_BUYER_PAYER_ID` | Optional. Sandbox buyer payer ID, reserved for opening disputes through the API |
 | `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY` | LLM settings. Only `google` is installed |
-| `DATABASE_URL` | SQLite file, default `file:./data/app.db` |
+| `DATABASE_URL` | PostgreSQL connection URL, default `postgresql://dispute:dispute_password@localhost:5433/dispute_defender` |
 | `APP_BASE_URL` | Public base URL of the app |
 | `APP_PASSWORD` | Merchant password that protects approve, submit, accept, and refund |
 | `CRON_SECRET` | Shared secret for `/api/cron/deadlines` |

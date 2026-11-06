@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { toMinorUnits } from "./money";
 
+export const DEFAULT_DATABASE_URL =
+  "postgresql://dispute:dispute_password@localhost:5433/dispute_defender";
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PAYPAL_ENV: z.literal("sandbox").default("sandbox"),
@@ -11,7 +14,7 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(["google", "anthropic", "openai"]).default("google"),
   AI_MODEL: z.string().min(1).default("gemini-3.8-flash"),
   AI_API_KEY: z.string().optional().default(""),
-  DATABASE_URL: z.string().default("file:./data/app.db"),
+  DATABASE_URL: z.string().default(DEFAULT_DATABASE_URL),
   APP_BASE_URL: z.string().default("http://localhost:3000"),
   APP_PASSWORD: z.string().optional().default(""),
   CRON_SECRET: z.string().min(1).default("dev-cron-secret"),

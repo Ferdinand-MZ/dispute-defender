@@ -1,17 +1,14 @@
 import { defineConfig } from "drizzle-kit";
-import fs from "fs";
-import path from "path";
 
-const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "./data/app.db";
-
-// drizzle-kit does not create parent folders; do it here so db:push works on every OS.
-fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
+const dbUrl =
+  process.env.DATABASE_URL ||
+  "postgresql://dispute:dispute_password@localhost:5433/dispute_defender";
 
 export default defineConfig({
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
-  dialect: "sqlite",
+  dialect: "postgresql",
   dbCredentials: {
-    url: dbPath,
+    url: dbUrl,
   },
 });
