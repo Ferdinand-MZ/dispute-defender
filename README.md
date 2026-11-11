@@ -4,6 +4,35 @@ An evidence-grounded AI copilot for PayPal merchants responding to customer disp
 
 When a customer opens a dispute, a small merchant faces a hard deadline and usually has no team to assemble evidence. DisputeDefender pulls the dispute from the PayPal Disputes API, combines it with the merchant's own order, shipping, policy, and message records, recommends **fight, refund, or accept** with a visible cost comparison, and drafts an evidence response in which every paragraph cites a real record. Nothing is sent to PayPal until the merchant approves it.
 
+**Jump to:** [Screenshots](#screenshots) · [Quick start](#quick-start) · [Documentation](#documentation) · [License](#license) · [Contributors](#contributors)
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/01-dispute-queue.png" alt="Dispute queue"><br><sub><b>Dispute queue.</b> Open cases sorted by deadline, each with a recommendation.</sub></td>
+    <td width="50%"><img src="docs/screenshots/02-recommendation-fight.png" alt="Fight recommendation"><br><sub><b>Recommendation.</b> Fight versus refund, with the cost comparison and what PayPal looks for.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/03-evidence-cited.png" alt="Cited evidence draft"><br><sub><b>Cited evidence draft.</b> Every paragraph links to the fact record it restates.</sub></td>
+    <td width="50%"><img src="docs/screenshots/04-approval-gate.png" alt="Approval gate"><br><sub><b>Approval gate.</b> The merchant reviews the exact packet and signs before anything is sent.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/05-ask-assistant.png" alt="Ask assistant"><br><sub><b>Read-only assistant.</b> Answers questions about the case and cites its sources.</sub></td>
+    <td width="50%"><img src="docs/screenshots/06-prompt-injection-accept.png" alt="Prompt injection case"><br><sub><b>Prompt injection.</b> Buyer text containing instructions is treated as data. The case is still recommended for accept.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/07-simulator-scenarios.png" alt="Simulator"><br><sub><b>Sandbox simulator.</b> Open a demo dispute and settle it as the PayPal side.</sub></td>
+    <td width="50%"><img src="docs/screenshots/08-validator-blocks-fake-tracking.png" alt="Validator blocks fake tracking"><br><sub><b>Grounding validator.</b> A tracking number that does not appear in the cited facts blocks approval.</sub></td>
+  </tr>
+</table>
+
+Screenshots were taken from a local run against the seeded demo data (`pnpm run demo:reset`).
+
+---
+
 ## Quick start
 
 Requirements: Node.js 20+, pnpm, and Docker (for PostgreSQL).
@@ -92,7 +121,8 @@ All settings live in `.env` (see `.env.example`).
 | `AUTOPILOT` | Keep `false`. No autonomous submission path exists |
 | `PAYPAL_WEBHOOK_SKIP_VERIFY` | Local testing only. Ignored in production |
 
-### Running against the PayPal sandbox
+<details>
+<summary><b>Running against the PayPal sandbox</b></summary>
 
 1. Create a sandbox REST app in the PayPal Developer Dashboard and set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`.
 2. Set `DEMO_MODE=false` and restart.
@@ -103,7 +133,24 @@ All settings live in `.env` (see `.env.example`).
 curl -X POST -H "x-cron-secret: <your CRON_SECRET>" http://localhost:3000/api/cron/deadlines
 ```
 
-## Project structure
+</details>
+
+## Commands
+
+```bash
+pnpm run dev         # development server on :3000
+pnpm run build       # production build
+pnpm run start       # start the production build
+pnpm run typecheck   # tsc --noEmit
+pnpm run lint        # ESLint
+pnpm run test        # Vitest (needs the PostgreSQL container)
+pnpm run db:push     # apply the Drizzle schema
+pnpm run db:seed     # seed store data
+pnpm run demo:reset  # wipe and reseed the demo state
+```
+
+<details>
+<summary><b>Project structure</b></summary>
 
 ```
 src/
@@ -124,32 +171,23 @@ src/
 fixtures/paypal/        # recorded sandbox responses used by tests
 scripts/                # demo-reset, plus manual PayPal sandbox checks in scripts/sandbox/
 tests-e2e/              # Playwright specs
-docs/                   # PRD and architecture
+docs/                   # PRD, architecture, and screenshots
 ```
 
 Unit and route tests sit next to the code they cover (`*.test.ts`).
 
-## Commands
+</details>
 
-```bash
-pnpm run dev         # development server on :3000
-pnpm run build       # production build
-pnpm run start       # start the production build
-pnpm run typecheck   # tsc --noEmit
-pnpm run lint        # ESLint
-pnpm run test        # Vitest (needs the PostgreSQL container)
-pnpm run db:push     # apply the Drizzle schema
-pnpm run db:seed     # seed store data
-pnpm run demo:reset  # wipe and reseed the demo state
-```
-
-## Troubleshooting
+<details>
+<summary><b>Troubleshooting</b></summary>
 
 | Symptom | Fix |
 |---|---|
 | "This page could not load", or "Database unreachable" in the top bar | Check that the container is running (`docker compose ps`) and that `DATABASE_URL` is a `postgresql://` URL |
 | Draft says "Assembled by rules" after **Regenerate draft** | No `AI_API_KEY`, or the model was unavailable. The reason is in the activity log |
 | Port 5433 already in use | Change the port in `docker-compose.yml` and `DATABASE_URL` |
+
+</details>
 
 ## Tech stack
 
@@ -162,14 +200,30 @@ Next.js 14 (App Router), React 18, TypeScript strict · Tailwind CSS, shadcn/ui 
 - Two dispute reasons are in scope: item not received, and not as described.
 - PayPal makes the final decision on every dispute. DisputeDefender helps merchants respond faster and more completely; it does not guarantee outcomes.
 
+---
+
 ## Documentation
 
 - [docs/01-PRD.md](docs/01-PRD.md): product requirements and scope
 - [docs/02-ARCHITECTURE.md](docs/02-ARCHITECTURE.md): data model, PayPal endpoints, agent pipeline
+- [docs/screenshots/](docs/screenshots/): screenshots used in this README
 - [PRODUCT.md](PRODUCT.md), [DESIGN.md](DESIGN.md): product brief and UI design system
 - [AGENTS.md](AGENTS.md): rules given to AI coding agents working on this repository
 - [docs/internal/](docs/internal/): team working notes (plan, prompts, submission checklist)
 
+---
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+## Contributors
+
+| Name | Commits |
+|---|---|
+| Muhammad | 42 |
+| Ferdinand-MZ | 9 |
+
+Counts are from `git shortlog -sn --all --no-merges`, excluding merge commits.
