@@ -1,10 +1,10 @@
-import { getSandboxDispute, provideDisputeEvidence } from "../src/lib/paypal/disputes";
-import { buildEvidencePayload } from "../src/lib/evidence/mapping";
-import { db } from "../src/lib/db";
-import { actions, disputes, facts, orders, drafts } from "../src/lib/db/schema";
+import { getSandboxDispute, provideDisputeEvidence } from "../../src/lib/paypal/disputes";
+import { buildEvidencePayload } from "../../src/lib/evidence/mapping";
+import { db } from "../../src/lib/db";
+import { actions, disputes, facts, orders, drafts } from "../../src/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { logAudit } from "../src/lib/audit";
-import { env } from "../src/lib/env";
+import { logAudit } from "../../src/lib/audit";
+import { env } from "../../src/lib/env";
 
 async function main() {
   console.log("==========================================================");
@@ -18,7 +18,7 @@ async function main() {
 
   const disputeId = process.argv[2];
   if (!disputeId) {
-    console.log("Usage: pnpm tsx scripts/spike-provide-evidence.ts <DISPUTE_ID> [--approve=\"<YOUR_NAME>\"]");
+    console.log("Usage: pnpm tsx scripts/sandbox/provide-evidence.ts <DISPUTE_ID> [--approve=\"<YOUR_NAME>\"]");
     process.exit(0);
   }
 
@@ -76,7 +76,7 @@ async function main() {
     console.log("DisputeDefender strictly forbids autonomous submission of evidence");
     console.log("to the PayPal Disputes API without human sign-off.");
     console.log("\nTo authorize and submit this evidence packet, re-run with:");
-    console.log(`  pnpm tsx scripts/spike-provide-evidence.ts ${disputeId} --approve="Your Name"`);
+    console.log(`  pnpm tsx scripts/sandbox/provide-evidence.ts ${disputeId} --approve="Your Name"`);
     console.log("==========================================================\n");
     process.exit(0);
   }

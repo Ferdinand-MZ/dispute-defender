@@ -103,6 +103,32 @@ All settings live in `.env` (see `.env.example`).
 curl -X POST -H "x-cron-secret: <your CRON_SECRET>" http://localhost:3000/api/cron/deadlines
 ```
 
+## Project structure
+
+```
+src/
+  app/                  # Next.js routes: pages and API
+    api/webhooks/       #   PayPal webhook receiver (signature check, dedupe)
+    api/cases/          #   analyze, draft, approve, submit, accept, refund, ask, packet
+    api/cron/           #   deadline job and dispute polling fallback
+    cases/              #   dispute queue and case detail
+    demo-shop/          #   demo storefront for sandbox orders
+    admin/simulate/     #   open and settle sandbox disputes
+  components/           # UI components (AG Grid queue, case view, charts)
+  lib/
+    agent/              # facts, scoring, decision, draft, grounding validator, state machine
+    paypal/             # REST client: auth, disputes, orders, tracking, webhooks
+    evidence/           # reason-to-evidence mapping, PDF evidence packet
+    db/                 # Drizzle schema, queries, seed
+    money.ts            # integer minor-unit arithmetic
+fixtures/paypal/        # recorded sandbox responses used by tests
+scripts/                # demo-reset, plus manual PayPal sandbox checks in scripts/sandbox/
+tests-e2e/              # Playwright specs
+docs/                   # PRD and architecture
+```
+
+Unit and route tests sit next to the code they cover (`*.test.ts`).
+
 ## Commands
 
 ```bash
@@ -140,8 +166,9 @@ Next.js 14 (App Router), React 18, TypeScript strict · Tailwind CSS, shadcn/ui 
 
 - [docs/01-PRD.md](docs/01-PRD.md): product requirements and scope
 - [docs/02-ARCHITECTURE.md](docs/02-ARCHITECTURE.md): data model, PayPal endpoints, agent pipeline
-- [docs/03-PLAN-AND-TASKS.md](docs/03-PLAN-AND-TASKS.md): plan, tasks, and status
-- [docs/05-DEMO-AND-SUBMISSION.md](docs/05-DEMO-AND-SUBMISSION.md): demo data and submission checklist
+- [PRODUCT.md](PRODUCT.md), [DESIGN.md](DESIGN.md): product brief and UI design system
+- [AGENTS.md](AGENTS.md): rules given to AI coding agents working on this repository
+- [docs/internal/](docs/internal/): team working notes (plan, prompts, submission checklist)
 
 ## License
 

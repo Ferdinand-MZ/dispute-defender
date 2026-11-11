@@ -4,6 +4,9 @@
   "private": true,
   "description": "An evidence-grounded AI copilot for PayPal merchants responding to customer disputes",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

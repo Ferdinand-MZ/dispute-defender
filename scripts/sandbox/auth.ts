@@ -1,5 +1,5 @@
-import { checkPayPalConnectivity, getPayPalAccessToken } from "../src/lib/paypal/client";
-import { env } from "../src/lib/env";
+import { checkPayPalConnectivity, getPayPalAccessToken } from "../../src/lib/paypal/client";
+import { env } from "../../src/lib/env";
 
 async function main() {
   console.log("==========================================================");

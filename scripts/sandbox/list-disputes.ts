@@ -1,6 +1,6 @@
-import { listSandboxDisputes } from "../src/lib/paypal/disputes";
-import { syncPayPalDisputeToDb } from "../src/lib/paypal/sync";
-import { env } from "../src/lib/env";
+import { listSandboxDisputes } from "../../src/lib/paypal/disputes";
+import { syncPayPalDisputeToDb } from "../../src/lib/paypal/sync";
+import { env } from "../../src/lib/env";
 
 async function main() {
   console.log("==========================================================");
@@ -9,7 +9,7 @@ async function main() {
 
   if (!env.PAYPAL_CLIENT_ID || !env.PAYPAL_CLIENT_SECRET) {
     console.warn("⚠️  PAYPAL CREDENTIALS NOT CONFIGURED:");
-    console.warn("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env to run this spike.");
+    console.warn("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env to run this script.");
     process.exit(0);
   }
 

@@ -68,7 +68,7 @@ Priority: **M** Must, **S** Should, **N** Nice. Estimates in hours. Acceptance c
 | T03 | PayPal client: OAuth with token caching, fetch wrapper (debug id, retry on 429/5xx, `PayPal-Request-Id`). Script to create and capture an order (buyer approval can be manual through the approve link). Save responses as fixtures | A | 2 | M | T01 | Script produces a capture id. Fixtures saved without secrets |
 | T04 | **Dispute spike.** Scripts: create a sandbox dispute (API with Auth-Assertion, or manual fallback), GET details, multipart `provide-evidence` with tracking and notes, `adjudicate`. Record the real field names and file limits. Save every response as a fixture | A | 5 | M | T03 | G1 criteria 1 to 6 (except the hosted webhook) |
 | T05 | Deploy the skeleton to a public URL. `/api/health` route. Register the webhook for the 3 dispute events. Save `PAYPAL_WEBHOOK_ID` | B | 2 | M | T02 | Public URL is live. The PayPal webhook simulator produces a server log |
-| T36 | Read the AG Grid sponsor page on Devpost, and the Rules page. Record prize requirements, live-demo duration rules, and participant eligibility | A | 1 | M | - | 10-line note in the repo (`docs/sponsor-notes.md`) |
+| T36 | Read the AG Grid sponsor page on Devpost, and the Rules page. Record prize requirements, live-demo duration rules, and participant eligibility | A | 1 | M | - | 10-line note in the repo (`docs/internal/sponsor-notes.md`) |
 
 ### Phase 1: Vertical slice (no LLM)
 

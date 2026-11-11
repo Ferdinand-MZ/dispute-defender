@@ -103,7 +103,7 @@ For the demo, focus on Rina (physical goods).
 | Innovation | Constrained AI: every claim has a source, and money moves only through deterministic code |
 | Presentation | A 3-minute video of one complete flow from webhook to resolved |
 
-Prizes we are targeting: Best Use of PayPal + AI, Most Impactful, the overall prizes, AG Grid. See the sponsor requirement notes in `docs/sponsor-notes.md` (T36).
+Prizes we are targeting: Best Use of PayPal + AI, Most Impactful, the overall prizes, AG Grid. See the sponsor requirement notes in `docs/internal/sponsor-notes.md` (T36).
 
 ## 9. Limitations to state honestly in the README and video
 

@@ -80,6 +80,10 @@ src/
     money.ts env.ts audit.ts
   components/
 fixtures/paypal/             # recorded sandbox responses (sanitized)
+scripts/
+  demo-reset.ts              # wipe and reseed the demo state
+  sandbox/                   # manual checks against the PayPal sandbox (auth, orders, disputes, evidence)
+tests-e2e/                   # Playwright specs
 ```
 
 ## Conventions
@@ -109,8 +113,8 @@ fixtures/paypal/             # recorded sandbox responses (sanitized)
 
 | File | Read when |
 |---|---|
-| `01-PRD.md` | You need the why, scope, user stories, or demo scenarios |
-| `02-ARCHITECTURE.md` | Any implementation work (data model, PayPal endpoints, agent pipeline) |
-| `03-PLAN-AND-TASKS.md` | You need your task, its acceptance criteria, or the schedule |
-| `04-VIBECODE-PROMPTS.md` | You are a human looking for the prompt to give an agent |
-| `05-DEMO-AND-SUBMISSION.md` | Demo seed data, video script, Devpost submission, final QA |
+| `docs/01-PRD.md` | You need the why, scope, user stories, or demo scenarios |
+| `docs/02-ARCHITECTURE.md` | Any implementation work (data model, PayPal endpoints, agent pipeline) |
+| `docs/internal/03-PLAN-AND-TASKS.md` | You need your task, its acceptance criteria, or the schedule |
+| `docs/internal/04-VIBECODE-PROMPTS.md` | You are a human looking for the prompt to give an agent |
+| `docs/internal/05-DEMO-AND-SUBMISSION.md` | Demo seed data, video script, Devpost submission, final QA |

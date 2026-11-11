@@ -1,5 +1,6 @@
 allowBuilds:
-  better-sqlite3: true
+  # Optional peer of drizzle-orm that pnpm auto-installs; the app uses pg, so its native build is skipped.
+  better-sqlite3: false
   esbuild: true
   unrs-resolver: true
 overrides:

@@ -1,6 +1,6 @@
-import { createSandboxOrder, getSandboxOrder, captureSandboxOrder } from "../src/lib/paypal/orders";
-import { syncPayPalOrderToDb } from "../src/lib/paypal/sync";
-import { env } from "../src/lib/env";
+import { createSandboxOrder, getSandboxOrder, captureSandboxOrder } from "../../src/lib/paypal/orders";
+import { syncPayPalOrderToDb } from "../../src/lib/paypal/sync";
+import { env } from "../../src/lib/env";
 
 async function main() {
   console.log("==========================================================");
@@ -9,7 +9,7 @@ async function main() {
 
   if (!env.PAYPAL_CLIENT_ID || !env.PAYPAL_CLIENT_SECRET) {
     console.warn("⚠️  PAYPAL CREDENTIALS NOT CONFIGURED:");
-    console.warn("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env to run this spike.");
+    console.warn("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env to run this script.");
     process.exit(0);
   }
 
@@ -68,10 +68,10 @@ async function main() {
     console.log("Next step to complete purchase capture:");
     console.log("1. Open the Approve Link above in your browser and log in with your sandbox buyer.");
     console.log("2. Click 'Complete Purchase'.");
-    console.log(`3. Run: pnpm tsx scripts/spike-orders.ts --capture=${order.id}`);
+    console.log(`3. Run: pnpm tsx scripts/sandbox/orders.ts --capture=${order.id}`);
     console.log("----------------------------------------------------------");
   } catch (err) {
-    console.error("❌ Order spike failed:", (err as Error).message);
+    console.error("❌ Order script failed:", (err as Error).message);
     process.exit(1);
   }
 }

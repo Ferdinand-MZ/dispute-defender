@@ -1,6 +1,6 @@
-import { getSandboxDispute, listSandboxDisputes } from "../src/lib/paypal/disputes";
-import { syncPayPalDisputeToDb } from "../src/lib/paypal/sync";
-import { env } from "../src/lib/env";
+import { getSandboxDispute, listSandboxDisputes } from "../../src/lib/paypal/disputes";
+import { syncPayPalDisputeToDb } from "../../src/lib/paypal/sync";
+import { env } from "../../src/lib/env";
 
 async function main() {
   console.log("==========================================================");
@@ -9,7 +9,7 @@ async function main() {
 
   if (!env.PAYPAL_CLIENT_ID || !env.PAYPAL_CLIENT_SECRET) {
     console.warn("⚠️  PAYPAL CREDENTIALS NOT CONFIGURED:");
-    console.warn("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env to run this spike.");
+    console.warn("Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env to run this script.");
     process.exit(0);
   }
 
@@ -24,7 +24,7 @@ async function main() {
         console.log(`Found sandbox dispute: ${disputeId}`);
       } else {
         console.log("No disputes found in sandbox account.");
-        console.log("Usage: pnpm tsx scripts/spike-dispute-details.ts <PAYPAL_DISPUTE_ID>");
+        console.log("Usage: pnpm tsx scripts/sandbox/dispute-details.ts <PAYPAL_DISPUTE_ID>");
         process.exit(0);
       }
     } catch (err) {
