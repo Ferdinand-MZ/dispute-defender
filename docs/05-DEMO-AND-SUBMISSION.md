@@ -7,7 +7,7 @@ Check every item before submitting. Also read the official **Rules** page, becau
 - [ ] The project uses at least one PayPal technology and AI in a meaningful way
 - [ ] A working prototype (not a mockup or static demo)
 - [ ] Text description: features and functionality
-- [ ] Functional demo: a hosted link **or** complete run instructions in the repo
+- [ ] Functional demo: complete run instructions in the repo (we submit the repository, with no hosted link)
 - [ ] Explanation of the AI tools used and how they were used
 - [ ] Public repo (GitHub, GitLab, or Bitbucket) containing all code, assets, and instructions
 - [ ] Open source license visible in the repo's About section
@@ -70,11 +70,12 @@ Small merchants face strict response deadlines for PayPal disputes and rarely ha
 - Builds a fact base from the merchant's own order, shipping, policy, and communication data.
 - Scores evidence strength and compares the expected cost of fighting versus refunding, with the formula visible.
 - Shows a draft response where every paragraph cites fact IDs; a deterministic validator blocks approval of any unsupported claim.
+- Builds a PDF evidence packet from the cited facts and attaches it to the evidence submission.
 - Submits evidence, accepts a claim, or refunds through PayPal APIs only after human approval, then tracks the resolution.
 - Lets the merchant ask questions about a case through an assistant that uses read-only PayPal Agent Toolkit tools.
 
 **How we built it**
-Next.js and TypeScript; PayPal Orders, Payments, Disputes, Shipment Tracking, and Webhooks APIs; PayPal Agent Toolkit for read-only agent tools; AG Grid for the case queue; SQLite with Drizzle; hosting on Render. The LLM writes language only; scoring, cost math, and every PayPal write are deterministic code behind human approval.
+Next.js and TypeScript; PayPal Orders, Payments, Disputes, Shipment Tracking, and Webhooks APIs; PayPal Agent Toolkit for read-only agent tools; AG Grid for the case queue; PostgreSQL with Drizzle. The LLM writes language only; scoring, cost math, and every PayPal write are deterministic code behind human approval.
 
 **AI tools used and how** (required by the rules)
 - Google Gemini (model set by `AI_MODEL`) via the Vercel AI SDK, with no tools: writes the evidence draft from the fact base (every paragraph cites fact IDs; a deterministic validator checks dates, amounts, carriers, tracking numbers, and URLs, with one retry on failure) and the plain-language explanation of the recommendation (rejected if it contains numbers). Scores, costs, and the recommendation are computed by code.
@@ -91,16 +92,16 @@ A full sandbox loop: order, dispute, webhook, evidence submission, and resolutio
 Constraining AI to language and leaving decisions to code makes payment tooling safer and easier to demo.
 
 **What's next**
-A PDF evidence packet, more dispute reasons, carrier integrations for automatic delivery proof, multi-merchant support, and optional autopilot with strict limits.
+More dispute reasons, carrier integrations for automatic delivery proof, multi-merchant support, and optional autopilot with strict limits.
 
-**Built with:** nextjs, typescript, paypal-disputes-api, paypal-orders-api, paypal-webhooks, paypal-agent-toolkit, ag-grid, sqlite, drizzle, gemini, render
+**Built with:** nextjs, typescript, paypal-disputes-api, paypal-orders-api, paypal-webhooks, paypal-agent-toolkit, ag-grid, postgresql, drizzle, gemini
 
 **Limitations (be explicit):** sandbox only; the likelihood bands are heuristics, not statistics; the final decision rests with PayPal.
 
 ## 5. README outline
 
 1. One sentence on what it is, plus a main screenshot.
-2. Demo: hosted link, demo credentials (if any), and a note that the instance may be asleep and needs about a minute to wake up.
+2. Demo: the repository is the submission; `DEMO_MODE=true` runs the full flow locally without credentials.
 3. Running locally (under 10 minutes): prerequisites, `.env` from `.env.example`, `pnpm install`, `pnpm run db:push`, `pnpm run demo:reset`, `pnpm run dev`, how to create a PayPal sandbox account and app, how to register the webhook (or rely on cron polling).
 4. How to try scenarios S1 to S4 step by step.
 5. Short architecture overview (diagram from doc 02).
@@ -126,8 +127,7 @@ A PDF evidence packet, more dispute reasons, carrier integrations for automatic 
 - [ ] `git log -p` and a secret scan: no keys or tokens in history
 - [ ] Repo is public in an incognito window, license visible in About
 - [ ] Video is public in incognito, under 3:00, no copyrighted music
-- [ ] Hosted URL opens from another network (mobile data)
-- [ ] All Devpost links are valid (repo, video, demo)
+- [ ] All Devpost links are valid (repo, video)
 - [ ] Devpost text names the AI tools and how they are used
 - [ ] Honest limitations are written down (sandbox, heuristics, final decision with PayPal)
 - [ ] Team members and prize categories filled in

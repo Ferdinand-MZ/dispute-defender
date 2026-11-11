@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/brand-logo";
 import {
+  DEFAULT_AI_MODEL_ID,
   AI_MODEL_OPTIONS,
   AI_MODEL_STORAGE_KEY,
   OPERATOR_NAME_STORAGE_KEY,
@@ -110,7 +111,7 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
 }
 
 function WorkspaceFooter() {
-  const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_AI_MODEL_ID);
   const [customModelInput, setCustomModelInput] = useState("");
   const [isCustom, setIsCustom] = useState(false);
   const [operatorName, setOperatorName] = useState("Sarah Jenkins");

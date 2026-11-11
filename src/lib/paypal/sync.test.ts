@@ -5,7 +5,7 @@ import { orders, disputes, facts } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { PayPalOrder, PayPalDispute } from "./types";
 
-describe("PayPal SQLite Normalization & Persistence Sync", () => {
+describe("PayPal PostgreSQL Normalization & Persistence Sync", () => {
   const mockOrderPayload: PayPalOrder = {
     id: "5EA-TEST-SYNC-01",
     status: "COMPLETED",

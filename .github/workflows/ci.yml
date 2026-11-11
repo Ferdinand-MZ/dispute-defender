@@ -11,6 +11,24 @@ jobs:
   verify:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dispute
+          POSTGRES_PASSWORD: dispute_password
+          POSTGRES_DB: dispute_defender
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U dispute -d dispute_defender"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://dispute:dispute_password@localhost:5433/dispute_defender
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,11 +37,6 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 10
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 12
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -45,5 +58,3 @@ jobs:
 
       - name: Production Build
         run: pnpm run build
-        env:
-          DATABASE_URL: file:./data/app.db

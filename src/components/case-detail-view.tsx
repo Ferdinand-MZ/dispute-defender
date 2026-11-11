@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/money";
 import {
   AI_MODEL_OPTIONS,
   AI_MODEL_STORAGE_KEY,
+  DEFAULT_AI_MODEL_ID,
   OPERATOR_NAME_STORAGE_KEY,
   WORKSPACE_PREFS_EVENT,
 } from "@/lib/ai-models";
@@ -188,7 +189,7 @@ export function CaseDetailView({
   const [agentBusy, setAgentBusy] = useState<null | "analyze" | "draft" | "save">(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftPayload | null>(null);
-  const [selectedAiModel, setSelectedAiModel] = useState<string>("gemini-2.5-flash");
+  const [selectedAiModel, setSelectedAiModel] = useState<string>(DEFAULT_AI_MODEL_ID);
 
   useEffect(() => {
     const syncPrefs = () => {
@@ -1151,7 +1152,7 @@ export function CaseDetailView({
             title="Ask about this dispute"
             description={
               <>
-                Read-only answers from PayPal Agent Toolkit (
+                Read-only answers from this dispute&apos;s records and, in sandbox mode, PayPal Agent Toolkit (
                 <span className="font-mono text-xs">get_dispute</span>, shipment tracking). It can&apos;t change anything.
               </>
             }
@@ -1179,7 +1180,7 @@ export function CaseDetailView({
             </form>
             {askLoading && (
               <p className="mt-3 text-sm text-muted-foreground" role="status">
-                Checking PayPal…
+                Checking the records…
               </p>
             )}
             {askAnswer && (

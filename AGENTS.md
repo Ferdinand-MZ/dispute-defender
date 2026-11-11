@@ -39,11 +39,11 @@ Judging criteria: technical implementation, design, potential impact, innovation
 
 - Next.js (App Router) + TypeScript (strict) + Node 20+
 - Tailwind CSS + shadcn/ui; AG Grid for the case queue
-- SQLite via better-sqlite3 + Drizzle ORM
+- PostgreSQL via `pg` + Drizzle ORM (local: `docker compose up -d`, port 5433)
 - Vercel AI SDK (`ai`) with structured output + zod; provider chosen by env
 - Thin PayPal REST client in `src/lib/paypal/` (fetch based). `@paypal/agent-toolkit` for read-style agent tools where it fits
 - `pdf-lib` for the evidence packet PDF
-- Vitest for tests. Deploy on Render (web service + cron job)
+- Vitest for tests. Runs locally from the repo; no hosting config is checked in
 
 Full rationale and design: `02-ARCHITECTURE.md`.
 
@@ -68,7 +68,7 @@ src/
   app/                       # routes: UI + API
     api/webhooks/paypal/     # webhook receiver
     api/cases/[id]/...       # approve, submit, accept, refund
-    api/cron/deadlines/      # called by Render cron (CRON_SECRET)
+    api/cron/deadlines/      # called by any scheduler (CRON_SECRET)
     cases/                   # queue + case detail
     demo-shop/               # demo storefront (creates real sandbox orders)
     admin/simulate/          # sandbox helpers (create dispute, adjudicate)

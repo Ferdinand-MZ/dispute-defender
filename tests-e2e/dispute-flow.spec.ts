@@ -21,6 +21,6 @@ test.describe("DisputeDefender End-to-End Flow", () => {
   test("Scenario S4 (PP-D-1004) quarantines prompt injection as untrusted", async ({ page }) => {
     await page.goto("/cases/PP-D-1004");
     await expect(page.getByText("PP-D-1004").first()).toBeVisible();
-    await expect(page.getByText(/Untrusted/i).first()).toBeVisible();
+    await expect(page.getByText(/treated as data only/i).first()).toBeVisible();
   });
 });

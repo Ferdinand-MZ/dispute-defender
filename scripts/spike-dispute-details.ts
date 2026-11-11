@@ -53,7 +53,7 @@ async function main() {
     }
 
     const synced = await syncPayPalDisputeToDb(dispute);
-    console.log(`\n✓ Synchronized to local SQLite fact base (Case State: ${synced.caseState})`);
+    console.log(`\n✓ Synchronized to local PostgreSQL fact base (Case State: ${synced.caseState})`);
   } catch (err) {
     console.error("❌ Failed to get dispute details:", (err as Error).message);
     process.exit(1);

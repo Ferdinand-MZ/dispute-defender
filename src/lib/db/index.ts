@@ -13,6 +13,12 @@ let _initPromise: Promise<void> | null = null;
 export function getPool(): Pool {
   if (_pool) return _pool;
   const connectionString = process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
+  if (!/^postgres(ql)?:\/\//.test(connectionString)) {
+    throw new Error(
+      "DATABASE_URL must be a PostgreSQL URL (postgresql://user:password@host:port/db). " +
+        "Copy the value from .env.example and start the database with `docker compose up -d`."
+    );
+  }
   _pool = new Pool({
     connectionString,
     max: 10,

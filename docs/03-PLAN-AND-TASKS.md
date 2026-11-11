@@ -67,8 +67,8 @@ Priority: **M** Must, **S** Should, **N** Nice. Estimates in hours. Acceptance c
 | T02 | Initialize the repo: Next.js, TypeScript strict, Tailwind, shadcn/ui, eslint, prettier, vitest. MIT license. `.env.example`. Copy `AGENTS.md` and these docs. GitHub Actions: typecheck, lint, test. Add the scripts from AGENTS.md | B | 2 | M | - | `pnpm run dev/build/typecheck/lint/test` green. CI green. Public repo with the license shown in About |
 | T03 | PayPal client: OAuth with token caching, fetch wrapper (debug id, retry on 429/5xx, `PayPal-Request-Id`). Script to create and capture an order (buyer approval can be manual through the approve link). Save responses as fixtures | A | 2 | M | T01 | Script produces a capture id. Fixtures saved without secrets |
 | T04 | **Dispute spike.** Scripts: create a sandbox dispute (API with Auth-Assertion, or manual fallback), GET details, multipart `provide-evidence` with tracking and notes, `adjudicate`. Record the real field names and file limits. Save every response as a fixture | A | 5 | M | T03 | G1 criteria 1 to 6 (except the hosted webhook) |
-| T05 | Deploy the skeleton to Render (web service). `/api/health` route. Register the webhook for the 3 dispute events. Save `PAYPAL_WEBHOOK_ID` | B | 2 | M | T02 | Public URL is live. The PayPal webhook simulator produces a server log |
-| T36 | Read the AG Grid and Render sponsor pages on Devpost, and the Rules page. Record prize requirements, live-demo duration rules, and participant eligibility | A | 1 | M | - | 10-line note in the repo (`docs/sponsor-notes.md`) |
+| T05 | Deploy the skeleton to a public URL. `/api/health` route. Register the webhook for the 3 dispute events. Save `PAYPAL_WEBHOOK_ID` | B | 2 | M | T02 | Public URL is live. The PayPal webhook simulator produces a server log |
+| T36 | Read the AG Grid sponsor page on Devpost, and the Rules page. Record prize requirements, live-demo duration rules, and participant eligibility | A | 1 | M | - | 10-line note in the repo (`docs/sponsor-notes.md`) |
 
 ### Phase 1: Vertical slice (no LLM)
 
@@ -143,10 +143,10 @@ The full list is in `02-ARCHITECTURE.md` section 12. The three most likely to br
 
 ## 7. Verified implementation status
 
-Last checked: Nov 5, 2026 (after the agent pipeline work on branch `feat/agent-pipeline`).
+Last checked: Nov 11, 2026 (after the PostgreSQL migration and the pre-submission pass).
 
 ### Done and verified
-- **T07 (Webhook receiver):** `POST /api/webhooks/paypal` verifies the PayPal signature, dedupes by event `id`, fetches the dispute, and syncs it to SQLite. Covered by route tests.
+- **T07 (Webhook receiver):** `POST /api/webhooks/paypal` verifies the PayPal signature, dedupes by event `id`, fetches the dispute, and syncs it to PostgreSQL. Covered by route tests.
 - **T18 (Human approval flow):** `POST /api/cases/[id]/approve` and the approval modal. A draft must pass grounding before it can be approved; the approval records `approvedBy`, stores a hash of the approved draft, and moves the case to `APPROVED`.
 - **T11 (Rule-based evidence submission and human gate):** `POST /api/cases/[id]/submit` requires `APPROVED`, builds the evidence payload from the order and draft (`src/lib/evidence/mapping.ts`), calls `provideDisputeEvidence` (fully simulated, with no PayPal call, when `DEMO_MODE=true`), and moves the case to `SUBMITTED`.
 - **T19 (Accept claim and refund):**
@@ -174,7 +174,7 @@ Last checked: Nov 5, 2026 (after the agent pipeline work on branch `feat/agent-p
 ### Quality gate results
 - `pnpm run typecheck`: 0 errors (TypeScript strict).
 - `pnpm run lint`: no ESLint warnings or errors.
-- `pnpm run test`: 18 test files, 101 tests passed.
+- `pnpm run test`: 19 test files, 102 tests passed (against PostgreSQL).
 - `pnpm run build`: Next.js 14 production build succeeds (5 pages, 16 API routes).
 
 ### Remaining blockers and risks

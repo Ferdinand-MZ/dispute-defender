@@ -5,11 +5,20 @@ export interface AiModelOption {
   description: string;
 }
 
+/** Sentinel: no per-request override, the server uses its configured `AI_MODEL`. */
+export const DEFAULT_AI_MODEL_ID = "default";
+
 export const AI_MODEL_OPTIONS: AiModelOption[] = [
+  {
+    id: DEFAULT_AI_MODEL_ID,
+    label: "Server default",
+    badge: "AI_MODEL",
+    description: "The model configured on the server through AI_MODEL",
+  },
   {
     id: "gemini-2.5-flash",
     label: "Gemini 2.5 Flash",
-    badge: "Recommended",
+    badge: "Fast",
     description: "Fast, grounded drafting & analysis with low latency",
   },
   {

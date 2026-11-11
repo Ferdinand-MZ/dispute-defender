@@ -44,7 +44,7 @@ Per `01-PRD.md` and `03-PLAN-AND-TASKS.md`, the MVP is defined by requirements *
 | Dependency | Purpose | Risk Level | Mitigation / Compatibility Strategy |
 |---|---|---|---|
 | **Next.js (App Router)** | Full-stack framework (UI + Route Handlers) | Low | Standard modern web stack. Node.js LTS v20+ / v22. |
-| **better-sqlite3 + Drizzle ORM** | Local / serverless SQLite persistence | Low-Medium | Zero-config local development; ephemeral disk on Render can be seeded automatically on startup in demo mode. |
+| **better-sqlite3 + Drizzle ORM** | Local / serverless SQLite persistence | Low-Medium | Zero-config local development; seeded automatically on startup in demo mode. |
 | **AG Grid Community (`ag-grid-react`)** | Data grid for dispute queue | Low | Verify official React module registration (`@ag-grid-community/core` & `@ag-grid-community/react`). |
 | **Vercel AI SDK (`ai`)** | Structured output generation via Zod | Medium | Standardize with `generateObject` / typed schemas. Guard against model API changes using pluggable providers. |
 | **PayPal REST API** | Sandbox payments, disputes, webhooks | Medium-High | Use pure fetch-based client with typed schemas, debug ID logging, and in-memory OAuth token caching. |
@@ -105,7 +105,7 @@ Financial and state transitions carry severe risk if left unchecked. The archite
    - Prompt instructions specify Gemini API / server-side structured outputs.
    - *Resolution:* Use the Vercel AI SDK (`ai` + `@ai-sdk/google` / `@ai-sdk/openai` / `@ai-sdk/anthropic`) or a clean typed provider abstraction that easily defaults to Gemini (Google) while satisfying the architecture's provider-agnostic requirement.
 3. **Database Setup for Hosted Demo:**
-   - Render uses ephemeral disks on free web services.
+   - A fresh checkout starts with an empty database.
    - *Resolution:* Support SQLite (`better-sqlite3`) with automatic `db:push` / `db:seed` on boot when `DEMO_MODE=true` and database is uninitialized, matching `02-ARCHITECTURE.md`.
 
 ---

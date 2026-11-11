@@ -2,6 +2,7 @@ import { z } from "zod";
 import { generateObject } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { env } from "../env";
+import { DEFAULT_AI_MODEL_ID } from "../ai-models";
 
 export class AIProviderNotConfiguredError extends Error {
   constructor(message = "AI Provider is not configured with an API key") {
@@ -31,7 +32,8 @@ export function getAIModel(overrideModelId?: string) {
     apiKey: env.AI_API_KEY,
   });
 
-  const targetModel = overrideModelId?.trim() || env.AI_MODEL;
+  const cleaned = overrideModelId?.trim();
+  const targetModel = cleaned && cleaned !== DEFAULT_AI_MODEL_ID ? cleaned : env.AI_MODEL;
   return google(targetModel);
 }
 
@@ -72,7 +74,7 @@ export function defaultAgentModel(overrideModelId?: string | null): AgentModel |
   if (!isAiConfigured()) {
     return null;
   }
-  const modelId = cleaned || configuredModelId();
+  const modelId = cleaned && cleaned !== DEFAULT_AI_MODEL_ID ? cleaned : configuredModelId();
   return {
     id: modelId,
     generate: <T extends z.ZodTypeAny>(options: GenerateStructuredOptions<T>) =>

@@ -103,7 +103,7 @@ For the demo, focus on Rina (physical goods).
 | Innovation | Constrained AI: every claim has a source, and money moves only through deterministic code |
 | Presentation | A 3-minute video of one complete flow from webhook to resolved |
 
-Prizes we are targeting: Best Use of PayPal + AI, Most Impactful, the overall prizes, AG Grid, Render. See the sponsor requirement notes in `docs/sponsor-notes.md` (T36).
+Prizes we are targeting: Best Use of PayPal + AI, Most Impactful, the overall prizes, AG Grid. See the sponsor requirement notes in `docs/sponsor-notes.md` (T36).
 
 ## 9. Limitations to state honestly in the README and video
 
@@ -116,5 +116,5 @@ Prizes we are targeting: Best Use of PayPal + AI, Most Impactful, the overall pr
 ## 10. Open questions (resolve before D3)
 
 - Does creating a sandbox dispute through the API (requires `PayPal-Auth-Assertion`) work for our account? Fallback: open the dispute manually from the sandbox buyer account. (T04, gate G1)
-- What are the exact requirements for the AG Grid and Render prizes? Read the sponsor pages on Devpost. (T36)
+- What are the exact requirements for the AG Grid prize? Read the sponsor pages on Devpost. (T36)
 - Must the hosted demo stay live after the deadline? Check the official Rules page. One participant repo mentions December 15, but that is not verified.

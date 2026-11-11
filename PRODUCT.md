@@ -32,7 +32,7 @@ Evidence that cannot be invented: every paragraph of the draft carries fact IDs,
 - Recommendations: FIGHT, REFUND, ACCEPT, with strength score (%) and win band (high / medium / low / very_low).
 - Human approval required for provide-evidence, accept-claim, refund. Approval is blocked unless grounding passes.
 - Read-only "Ask copilot" uses PayPal Agent Toolkit tools (`get_dispute`, shipment tracking).
-- Sponsor tech in the UI: AG Grid (case queue), AG Charts (overview), deployed on Render.
+- Sponsor tech in the UI: AG Grid (case queue), AG Charts (overview).
 - Money is integer minor units; display via `formatMoney`.
 
 ## Brand Commitments

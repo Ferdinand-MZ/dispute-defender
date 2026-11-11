@@ -45,6 +45,9 @@ function buildTheme(fontFamily: string): AgChartTheme {
   };
 }
 
+// The chart canvas defaults to its own height; pin it to the figure so the axis stays inside the card.
+const CHART_STYLE = { width: "100%", height: "100%" } as const;
+
 const OPEN_STATES = ["NEW", "ANALYZED", "DRAFTED", "APPROVED", "SUBMITTED"];
 
 interface BarDatum {
@@ -152,7 +155,7 @@ export function DashboardCharts({ cases }: { cases: DashboardCaseItem[] }) {
           <p className="text-sm text-muted-foreground">Amounts PayPal holds while each open dispute is decided.</p>
         </figcaption>
         <div className="mt-4 h-[240px] w-full">
-          <AgCharts options={onHoldOptions} />
+          <AgCharts options={onHoldOptions} style={CHART_STYLE} />
         </div>
       </figure>
 
@@ -163,7 +166,7 @@ export function DashboardCharts({ cases }: { cases: DashboardCaseItem[] }) {
             <p className="text-sm text-muted-foreground">All {cases.length} disputes recorded in the sandbox.</p>
           </figcaption>
           <div className="mt-4 h-[240px] w-full">
-            <AgCharts options={outcomesOptions} />
+            <AgCharts options={outcomesOptions} style={CHART_STYLE} />
           </div>
         </figure>
       )}

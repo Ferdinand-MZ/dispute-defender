@@ -10,7 +10,7 @@ flowchart LR
   PP -->|CUSTOMER.DISPUTE.CREATED / UPDATED / RESOLVED| WH[/api/webhooks/paypal/]
   WH -->|verify signature, dedupe| Intake[Intake]
   Intake -->|GET dispute details| PP
-  Intake --> DB[(SQLite)]
+  Intake --> DB[(PostgreSQL)]
   DB --> Facts[Facts builder]
   Facts --> Analyze[Analyze: strength score + EV + LLM rationale]
   Analyze --> Draft[Draft writer LLM]
@@ -18,7 +18,7 @@ flowchart LR
   Ground --> UI[Case UI: AG Grid queue + detail]
   UI -->|human approves| Actions[Actions]
   Actions -->|provide-evidence / accept-claim / refund| PP
-  Cron[Render cron] -->|every 15 min| Deadlines[Deadline job]
+  Cron[Scheduler] -->|every 15 min| Deadlines[Deadline job]
   Deadlines --> DB
 ```
 
@@ -30,12 +30,11 @@ Principle: **LLM for language, code for decisions.** The model summarizes and wr
 |---|---|---|
 | App | Next.js App Router, TypeScript strict | One repo for UI + API, easy deploy, great for vibecoding |
 | UI | Tailwind + shadcn/ui, AG Grid (React) | Fast polished UI; AG Grid is a sponsor and fits the queue use case |
-| DB | SQLite (better-sqlite3) + Drizzle | Zero setup for judges to run locally. Seeded on boot, so ephemeral disk on Render is fine |
+| DB | PostgreSQL (`pg`) + Drizzle | One `docker compose up -d` locally. Tables are created and demo data is seeded on boot |
 | LLM | Vercel AI SDK, structured output with zod | Provider-agnostic. Switch model by env without code changes |
 | PayPal | Thin fetch client + `@paypal/agent-toolkit` for read tools | Evidence upload needs raw multipart REST. Toolkit shows genuine agent integration |
-| PDF | `pdf-lib` | Pure JS, no headless browser on Render |
+| PDF | `pdf-lib` | Pure JS, no headless browser needed |
 | Tests | Vitest + recorded fixtures | Fast, no network |
-| Hosting | Render web service + cron job | Sponsor, simple, stable webhook URL |
 
 Check the installed version's docs for exact API names of the AI SDK and the toolkit before using them. Do not rely on memory.
 
@@ -60,7 +59,7 @@ EFFORT_COST=5.00              # merchant time cost per contested case (USD)
 AUTOPILOT=false
 ```
 
-## 4. Data model (Drizzle, SQLite)
+## 4. Data model (Drizzle, PostgreSQL)
 
 Money columns store integer minor units plus `currency`. Timestamps are ISO strings in UTC.
 
@@ -209,7 +208,7 @@ All three numbers are shown with the formula so a merchant can disagree. Note th
 | `POST /api/admin/simulate/dispute` | Sandbox: create dispute |
 | `POST /api/admin/simulate/adjudicate` | Sandbox: settle dispute |
 | `POST /api/cron/deadlines` | Header `x-cron-secret`; updates urgency and polls PayPal as webhook fallback |
-| `GET /api/health` | Health check for Render |
+| `GET /api/health` | Health check: database connectivity, execution mode, configured model |
 
 Optional basic-auth middleware when `APP_PASSWORD` is set. Exempt `/api/webhooks/paypal`, `/api/cron/*`, `/api/health`.
 
@@ -227,15 +226,15 @@ Design rules: clear empty, loading, and error states. Urgency uses color plus te
 
 ## 9. Background jobs
 
-Render cron job calls `POST /api/cron/deadlines` every 15 minutes: recompute urgency, mark `EXPIRED` when the due date passes with no submission, and as a webhook fallback poll `GET /v1/customer/disputes` for recently updated disputes and upsert any missing.
+A scheduler (any cron, or a manual `curl`) calls `POST /api/cron/deadlines`, for example every 15 minutes: recompute urgency, mark `EXPIRED` when the due date passes with no submission, and as a webhook fallback poll `GET /v1/customer/disputes` for recently updated disputes and upsert any missing.
 
-## 10. Deployment (Render)
+## 10. Running the app
 
-- Web service: build `pnpm install --frozen-lockfile && pnpm run build`, start `pnpm run start`, health check `/api/health`.
-- Register the webhook in the PayPal developer dashboard pointing to `https://<service>.onrender.com/api/webhooks/paypal` with the three dispute events. Save its ID as `PAYPAL_WEBHOOK_ID`.
-- Cron job: HTTP call with `x-cron-secret`.
-- Free instances sleep. Ping the app before recording and before judging periods. Document this in the README and offer local run instructions as the primary path.
-- With `DEMO_MODE=true` and an empty DB, run `demo:reset` on boot.
+The submission is the repository; there is no hosted instance. The primary path is local (see the README).
+
+- Start PostgreSQL with `docker compose up -d`, then `pnpm run demo:reset` and `pnpm run dev`.
+- `DEMO_MODE=true` needs no PayPal or AI credentials: tables are created on boot and the demo scenarios are seeded when the database is empty.
+- For the real sandbox loop (`DEMO_MODE=false`), expose the app on a public HTTPS URL, register a webhook for the three dispute events pointing to `/api/webhooks/paypal`, and save its ID as `PAYPAL_WEBHOOK_ID`. Without a public URL, call `/api/cron/deadlines` to poll PayPal instead.
 
 ## 11. Testing
 
@@ -252,7 +251,7 @@ Render cron job calls `POST /api/cron/deadlines` every 15 minutes: recompute urg
 | R2 | Webhooks do not arrive | Cron polling of `GET /v1/customer/disputes`. Webhook simulator for demo |
 | R3 | LLM invents claims | Grounding validator blocks approval |
 | R4 | Evidence upload rejected | Record the real error as a fixture, adjust field names, test with `ERRDIS035` style values |
-| R5 | Render cold start during judging | Local run instructions first, keep-warm ping, note in README |
+| R5 | Judges cannot reach a hosted instance | No hosted dependency: the README runs the full demo locally in `DEMO_MODE` |
 | R6 | Schedule slips | Cut by the Must/Should/Nice list in `01-PRD.md` |
 | R7 | Judges cannot access the app | Provide demo credentials in submission notes or run without auth in demo mode |
 | R8 | Sponsor prize conditions unknown | Read sponsor pages in T36 before committing time to them |
